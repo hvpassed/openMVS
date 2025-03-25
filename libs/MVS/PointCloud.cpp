@@ -537,6 +537,53 @@ bool PointCloud::SaveWithScale(const String& fileName, const ImageArr& images, f
 	DEBUG_EXTRA("Point-cloud saved: %u points with scale (%s)", points.size(), TD_TIMER_GET_FMT().c_str());
 	return true;
 } // SaveWithScale
+
+
+
+bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
+{
+	if (IsEmpty())
+		return false;
+	TD_TIMER_STARTD();
+
+	// create PLY object
+	ASSERT(!fileName.empty());
+	Util::ensureFolder(fileName);
+	using namespace PointCloudInternal;
+	PLY ply;
+	if (!ply.write(fileName, 1, BasicPLY::elem_names,PLY::ASCII))
+		return false;
+
+	// write the header
+	BasicPLY::Vertex::InitSaveProps(ply, (int)points.size(), !colors.empty(), !normals.empty(),
+		!pointViews.empty(),!pointWeights.empty());
+	if (!ply.header_complete())
+		return false;
+
+	// export the array of 3D points
+	BasicPLY::Vertex vertex;
+	FOREACH(i, points) {
+		// export the vertex position, color, normal and views
+		vertex.p = points[i];
+		if (!colors.empty())
+			vertex.c = colors[i];
+		if (!normals.empty())
+			vertex.n = normals[i];
+		if (!pointViews.empty()) {
+			vertex.views.num = pointViews[i].size();
+			vertex.views.pIndices = pointViews[i].data();
+		}
+		if (!pointWeights.empty()) {
+			ASSERT(vertex.views.num == pointWeights[i].size());
+			vertex.views.pWeights = pointWeights[i].data();
+		}
+		ply.put_element(&vertex);
+	}
+	ASSERT(ply.get_current_element_count() == (int)points.size());
+
+	DEBUG_EXTRA("Point-cloud '%s' saved: %u points (%s)", Util::getFileNameExt(fileName).c_str(), points.GetSize(), TD_TIMER_GET_FMT().c_str());
+	return true;
+}
 /*----------------------------------------------------------------*/
 
 
@@ -693,4 +740,20 @@ void PointCloud::PrintStatistics(const Image* pImages, const OBB3f* pObb) const
 		strColors.c_str()
 	);
 } // PrintStatistics
-/*----------------------------------------------------------------*/
+
+MVS::PointCloud::SEGMENT MVS::PointCloud::ComputeSegments(const SegProVec& data, SEACAVE::IDX size)
+{
+	SegProVec dive = data / (float)size;
+	int max = 0;
+	float maxVal = data[0];
+	for (int i = 1; i < SEG_CLASS; i++) {
+		if (data[i] > maxVal)
+		{
+			max = i;
+			maxVal = data[i];
+		}
+	}
+
+
+	return max;
+}

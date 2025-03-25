@@ -16,6 +16,10 @@
     "eigen3",
     "glew",
     "glfw3",
+    {
+      "name": "hdf5",
+      "features": ["cpp"]
+    },
     "libpng",
     {
       "name": "opencv",

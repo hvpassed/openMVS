@@ -260,7 +260,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 			ImportDepthDataRaw(ComposeDepthFilePath(view.GetID(), "dmap"),
 				imageFileName, IDs, imageSize, view.cameraDepthMap.K, view.cameraDepthMap.R, view.cameraDepthMap.C,
 				dMin, dMax, view.depthMap, normalMap, confMap, viewsMap, 1);
-			ASSERT(viewRef.image.size() == view.depthMap.size());
+			//ASSERT(viewRef.image.size() == view.depthMap.size());
 		}
 		view.Init(viewRef.camera);
 	}
@@ -1614,6 +1614,7 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 	typedef SEACAVE::BitMatrix UseMask;
 	typedef CLISTDEFIDX(UseMask,IIndex) UseMaskArr;
 
+	SegProArr arrSegData = this->arrSegProData;
 	// fuse all depth-maps, processing the best connected images first
 	const unsigned nMinViewsFuse(MINF(OPTDENSE::nMinViewsFuse, arrDepthData.size()));
 	const float normalError(COS(FD2R(OPTDENSE::fNormalDiffThreshold)));
@@ -1648,14 +1649,19 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 	FloatArr fusedWeights;
 	Point3d fusedNormal;
 	Pixel32F fusedColor;
+	SegProVec fusedSegData;
+	fusedSegData.setZero();
 	const auto FusePoint = [&](IIndex ID, const ImageRef& x, unsigned fuseDepth) -> void {
 		const auto lambda = [&](IIndex ID, const ImageRef& x, unsigned fuseDepth, const auto& FusePointImpl) -> void {
 			const DepthData& depthData = arrDepthData[ID];
+			SegPro& segData = arrSegData[ID];
+
 			if (!Image8U::isInside(x, depthData.size))
 				return;
 			// ignore pixel if not estimated
 			ASSERT(depthData.depthMap.size() == depthData.size);
 			const Depth depth = depthData.depthMap(x);
+
 			if (depth <= Depth(0))
 				return;
 			ASSERT(ISINSIDE(depth, depthData.dMin * 0.95f, depthData.dMax * 1.05f));
@@ -1710,6 +1716,10 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 					fusedNormal += Cast<double>(normal);
 				if (bEstimateColor)
 					fusedColor += Cast<float>(image.pImageData->image(x));
+				//º∆À„”Ô“Â
+				fusedSegData += segData.getSegProData(x.x,x.y);
+
+
 			}
 			// remember the first pixel as the reference.
 			if (fuseDepth == 0) {
@@ -1813,6 +1823,8 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 						pointcloud.normals.emplace_back(normalized(fusedNormal));
 					if (bEstimateColor)
 						pointcloud.colors.emplace_back((fusedColor/(float)fusedPoints[0].size()).cast<uint8_t>());
+
+					pointcloud.segmentsPro.emplace_back(fusedSegData / (float)fusedPoints[0].size());
 				}
 				if (!fusedViews.empty()) {
 					nDepths += fusedViews.size();
@@ -1823,6 +1835,7 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 					fusedWeights.clear();
 					fusedNormal = Point3d::ZERO;
 					fusedColor = Pixel32F::BLACK;
+					fusedSegData.setZero();
 				}
 			}
 		}
@@ -1884,18 +1897,29 @@ void DenseDepthMapData::SignalCompleteDepthmapFilter()
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
 
-bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI)
+bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI,bool skip)
 {
 	DenseDepthMapData data(*this, nFusionMode);
 
 	// estimate depth-maps
+
 	if (!ComputeDepthMaps(data))
 		return false;
+	
 	if (ABS(nFusionMode) == 1)
 		return true;
 
 	// fuse all depth-maps
 	pointcloud.Release();
+	if (!skip) {
+		if (!Scene::saveImgRef(data)) {
+			exit(1);
+		}
+	}
+
+
+	data.depthMaps.arrSegProData = readFromHDF5();
+	VERBOSE("End read");
 	switch (OPTDENSE::nFuseFilter) {
 	case OPTDENSE::FUSE_NOFILTER:
 		// merge depth-maps
@@ -2563,3 +2587,31 @@ void Scene::PointCloudFilter(int thRemove)
 	DEBUG_EXTRA("Point-cloud filtered: %u/%u points (%d%%%%) (%s)", pointcloud.points.size(), numInitPoints, ROUND2INT((100.f*pointcloud.points.GetSize())/numInitPoints), TD_TIMER_GET_FMT().c_str());
 } // PointCloudFilter
 /*----------------------------------------------------------------*/
+bool Scene::saveImgRef(MVS::DenseDepthMapData& data) {
+	{
+		std::ofstream ofs("imgRef.txt");
+		if (ofs) {
+			ofs << "ID,Width,Height,Name" << std::endl;
+			FOREACH(i, data.depthMaps.arrDepthData) {
+				DepthData& depthData = data.depthMaps.arrDepthData[i];
+
+
+				if (!depthData.IsValid()) {
+					VERBOSE("Invalid depth-map for image %u", i);
+					exit(1);
+				}
+
+				Image* refImg = depthData.images[0].pImageData;
+				VERBOSE("ID %u  Image size (%u %u) depthmap name %s", refImg->ID, refImg->width, refImg->height, refImg->name.c_str());
+				ofs << refImg->ID << "," << refImg->width << "," << refImg->height << "," << refImg->name.c_str() << std::endl;
+			}
+			ofs.close();
+		}
+		else {
+			VERBOSE("File open failed");
+			return false;
+		}
+	}
+	return true;
+
+}

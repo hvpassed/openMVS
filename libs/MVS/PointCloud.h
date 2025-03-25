@@ -36,7 +36,7 @@
 // I N C L U D E S /////////////////////////////////////////////////
 
 #include "Image.h"
-
+#include "../IO/SegPro.h"
 
 // D E F I N E S ///////////////////////////////////////////////////
 
@@ -74,13 +74,21 @@ public:
 
 	typedef TOctree<PointArr,Point::Type,3> Octree;
 
+	typedef SegProVec SEGPRO;
+	typedef CLISTDEF0IDX(SEGPRO, Index) SegProArr;
+
+	typedef uint32_t SEGMENT;
+	typedef CLISTDEF0IDX(SEGMENT, Index) SegmentArr;
+
+
 public:
 	PointArr points;
 	PointViewArr pointViews; // array of views for each point (ordered increasing)
 	PointWeightArr pointWeights;
 	NormalArr normals;
 	ColorArr colors;
-
+	SegmentArr segments;
+	SegProArr segmentsPro;
 public:
 	PointCloud& Swap(PointCloud&);
 
@@ -105,8 +113,13 @@ public:
 	bool Save(const String& fileName, bool bViews=false, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveNViews(const String& fileName, uint32_t minViews, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveWithScale(const String& fileName, const ImageArr& images, float scaleMult, bool bLegacyTypes=false, bool bBinary=true) const;
+	bool SaveWithSegments(const String& fileName) const;
+
 
 	void PrintStatistics(const Image* pImages = NULL, const OBB3f* pObb = NULL) const;
+
+
+	static SEGMENT ComputeSegments(const SegProVec & data,SEACAVE::IDX size);
 
 	#ifdef _USE_BOOST
 	// implement BOOST serialization

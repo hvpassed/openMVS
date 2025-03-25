@@ -36,7 +36,7 @@
 // I N C L U D E S /////////////////////////////////////////////////
 
 #include "SemiGlobalMatcher.h"
-
+#include "../../libs/IO/SegPro.h"
 
 // S T R U C T S ///////////////////////////////////////////////////
 
@@ -51,6 +51,15 @@ class PatchMatch;
 #endif // _USE_CUDA
 
 // structure used to compute all depth-maps
+
+typedef 
+
+class MVS_API SegProData {
+	SegProData();
+	~SegProData();
+
+};
+
 class MVS_API DepthMapsData
 {
 public:
@@ -83,6 +92,8 @@ public:
 	Scene& scene;
 
 	DepthDataArr arrDepthData;
+	SegProArr arrSegProData;
+
 
 	// used internally to estimate the depth-maps
 	Image8U::Size prevDepthMapSize; // remember the size of the last estimated depth-map
