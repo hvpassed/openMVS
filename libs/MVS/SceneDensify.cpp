@@ -1860,6 +1860,9 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 		numDMapsFused, nDepths, pointcloud.points.size(), ROUND2INT((100.f*pointcloud.points.size())/nDepths),
 		static_cast<double>(totalNumImageNeighborsInCache) / numDMapsFused,
 		static_cast<double>(totalNumImagesInCache) / numDMapsFused, TD_TIMER_GET_FMT().c_str());
+	VERBOSE("Start write");
+	PointCloud::SaveTestFile(pointcloud, "pointcloud_dense.bin");
+	VERBOSE("End write");
 } // DenseFuseDepthMaps
 /*----------------------------------------------------------------*/
 

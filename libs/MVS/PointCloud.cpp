@@ -244,6 +244,7 @@ namespace BasicPLY {
 		} views;
 		float confidence;
 		float scale;
+		PointCloud::SEGPRO s;
 		static void InitLoadProps(PLY& ply, int elem_count,
 			PointCloud::PointArr& points, PointCloud::ColorArr& colors, PointCloud::NormalArr& normals, PointCloud::PointViewArr& views, PointCloud::PointWeightArr& weights)
 		{
@@ -300,7 +301,8 @@ namespace BasicPLY {
 		// duplicates
 		{"diffuse_red",   PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.r), 0, 0, 0, 0},
 		{"diffuse_green", PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.g), 0, 0, 0, 0},
-		{"diffuse_blue",  PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.b), 0, 0, 0, 0}
+		{"diffuse_blue",  PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.b), 0, 0, 0, 0},
+
 	};
 } // namespace BasicPLY
 } // namespace PointCloudInternal
@@ -557,6 +559,11 @@ bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
 	// write the header
 	BasicPLY::Vertex::InitSaveProps(ply, (int)points.size(), !colors.empty(), !normals.empty(),
 		!pointViews.empty(),!pointWeights.empty());
+	ply.describe_property(BasicPLY::elem_names[0], 16, BasicPLY::Vertex::props);
+	ply.describe_property(BasicPLY::elem_names[0], 17, BasicPLY::Vertex::props);
+	ply.describe_property(BasicPLY::elem_names[0], 18, BasicPLY::Vertex::props);
+	ply.describe_property(BasicPLY::elem_names[0], 19, BasicPLY::Vertex::props);
+	ply.describe_property(BasicPLY::elem_names[0], 20, BasicPLY::Vertex::props);
 	if (!ply.header_complete())
 		return false;
 
@@ -577,12 +584,31 @@ bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
 			ASSERT(vertex.views.num == pointWeights[i].size());
 			vertex.views.pWeights = pointWeights[i].data();
 		}
+		if (!segmentsPro.empty()) {
+
+			FOREACH(i, segmentsPro) {
+				ply.put_element(&segmentsPro[i]);
+			}
+		}
 		ply.put_element(&vertex);
 	}
+
+
 	ASSERT(ply.get_current_element_count() == (int)points.size());
 
 	DEBUG_EXTRA("Point-cloud '%s' saved: %u points (%s)", Util::getFileNameExt(fileName).c_str(), points.GetSize(), TD_TIMER_GET_FMT().c_str());
 	return true;
+}
+bool MVS::PointCloud::SaveTestFile(const PointCloud& pointCloud, const String& filename)
+{
+	std::ofstream ofs(filename, std::ios::binary);
+	if (ofs.is_open()) {
+		boost::archive::binary_oarchive oa(ofs);
+		oa << pointCloud;
+		ofs.close();
+		return true;
+	}
+	return false;
 }
 /*----------------------------------------------------------------*/
 

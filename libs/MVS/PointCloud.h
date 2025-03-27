@@ -37,6 +37,13 @@
 
 #include "Image.h"
 #include "../IO/SegPro.h"
+#include<boost/archive/binary_oarchive.hpp>
+#include <boost/serialization/array.hpp>
+#include <boost/serialization/nvp.hpp>
+#include <boost/serialization/split_free.hpp>
+#include <Eigen/Core>
+#include<fstream>
+
 
 // D E F I N E S ///////////////////////////////////////////////////
 
@@ -114,7 +121,7 @@ public:
 	bool SaveNViews(const String& fileName, uint32_t minViews, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveWithScale(const String& fileName, const ImageArr& images, float scaleMult, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveWithSegments(const String& fileName) const;
-
+	static bool SaveTestFile(const PointCloud& pointCloud, const String& filename);
 
 	void PrintStatistics(const Image* pImages = NULL, const OBB3f* pObb = NULL) const;
 
@@ -130,6 +137,8 @@ public:
 		ar & pointWeights;
 		ar & normals;
 		ar & colors;
+		ar & segments;
+		ar& segmentsPro;
 	}
 	#endif
 };
@@ -199,5 +208,13 @@ typedef MVS_API SEACAVE::cList<ConfidenceMap,const ConfidenceMap&,2> ConfidenceM
 /*----------------------------------------------------------------*/
 
 } // namespace MVS
+
+
+
+
+
+
+
+
 
 #endif // _MVS_POINTCLOUD_H_

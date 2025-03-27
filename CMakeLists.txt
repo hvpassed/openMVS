@@ -134,6 +134,8 @@ if(OpenMVS_USE_CUDA)
 		ENABLE_LANGUAGE(CUDA)
 		# not required, but forced by OpenCV old support for CUDA
 		FIND_PACKAGE(CUDA REQUIRED)
+		
+		find_package(CUDAToolkit REQUIRED)
 		# CUDA-11.x can not be compiled using C++14 standard on Windows
 		string(REGEX MATCH "^[0-9]+" CUDA_VERSION_MAJOR ${CMAKE_CUDA_COMPILER_VERSION})
 		string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR ${CMAKE_CUDA_COMPILER_VERSION})
@@ -248,6 +250,70 @@ if(OpenCV_FOUND)
 	MESSAGE(STATUS "OpenCV ${OpenCV_VERSION} found (include: ${OpenCV_INCLUDE_DIRS})")
 else()
 	MESSAGE("-- Can't find OpenCV. Please specify OpenCV directory using OpenCV_DIR variable")
+endif()
+
+set(MKL_COMPONENTS
+    intel_lp64
+    intel_thread
+    core
+)
+set(MKL_INTERFACE_FULL "intel_lp64")
+find_package(MKL REQUIRED COMPONENTS ${MKL_COMPONENTS})
+if(MKL_FOUND)
+	message(STATUS "Using Intel MKL for BLAS/LAPACK")
+	MESSAGE(STATUS "Intel MKL ${MKL_VERSION} found (libs: ${MKL_LIBRARIES})")
+	if(NOT MKL_LIBRARIES)
+        set(MKL_LIBRARIES
+            "${MKL_ROOT}/lib/mkl_intel_lp64_dll.lib"
+            "${MKL_ROOT}/lib/mkl_intel_thread_dll.lib"
+            "${MKL_ROOT}/lib/mkl_core_dll.lib"
+            "${MKL_ROOT}/../../compiler/latest/lib/libiomp5md.lib"
+        )
+        message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
+    endif()
+	list(APPEND OpenMVS_EXTRA_LIBS ${MKL_LIBRARIES})
+else()
+	MESSAGE(STATUS "-- Can't find MKL. Please specify MKL directory using MKL_DIR variable")
+endif()
+
+find_package(FAISS REQUIRED COMPONENTS faiss)
+if(TARGET faiss)
+    # CPU部分
+    get_target_property(FAISS_INCLUDE_DIRS faiss INTERFACE_INCLUDE_DIRECTORIES)
+    list(APPEND OpenMVS_EXTRA_INCLUDES ${FAISS_INCLUDE_DIRS})
+    list(APPEND OpenMVS_EXTRA_LIBS faiss)
+    
+    # GPU部分
+    if(OpenMVS_USE_CUDA)
+        find_package(FAISS REQUIRED COMPONENTS faiss_gpu)
+        if(TARGET faiss_gpu)
+            get_target_property(FAISS_GPU_INCLUDE_DIRS faiss_gpu INTERFACE_INCLUDE_DIRECTORIES)
+            list(APPEND OpenMVS_EXTRA_INCLUDES ${FAISS_GPU_INCLUDE_DIRS})
+            list(APPEND OpenMVS_EXTRA_LIBS faiss_gpu)
+            
+            # 添加CUDA依赖
+            list(APPEND OpenMVS_EXTRA_LIBS
+                ${CUDA_cublas_LIBRARY}
+                ${CUDA_cudart_LIBRARY}
+                ${CUDA_curand_LIBRARY}
+            )
+            
+            # 添加OpenMP
+            find_package(OpenMP REQUIRED)
+            if(OpenMP_FOUND)
+                list(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
+            endif()
+            
+            set(_USE_FAISS_GPU TRUE)
+            message(STATUS "FAISS-GPU enabled with CUDA support")
+        else()
+            message(WARNING "FAISS-GPU not found - falling back to CPU only")
+        endif()
+    endif()
+    
+    set(_USE_FAISS TRUE)
+else()
+    message(FATAL_ERROR "FAISS not found - required for OpenMVS")
 endif()
 
 LIST(REMOVE_DUPLICATES OpenMVS_EXTRA_INCLUDES)

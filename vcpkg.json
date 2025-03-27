@@ -25,7 +25,9 @@
       "name": "opencv",
       "features": [
         "eigen",
-        "openexr"
+        "openexr",
+        "tbb",
+        "openmp"
       ]
     },
     "opengl",

@@ -10,11 +10,24 @@
 #include<sstream>
 // ÆäËû´úÂë
 #include <libs/MVS/Image.h>
+
+#include <boost/serialization/serialization.hpp>
+#include <boost/serialization/array.hpp>
 #define SEG_CLASS 5	
 
 typedef Eigen::Array<float, SEG_CLASS, 1> SegProVec;
 
+namespace boost {
+	namespace serialization {
 
+		template<class Archive>
+		void serialize(Archive& ar, Eigen::Array<float, SEG_CLASS, 1, 0, SEG_CLASS, 1>& m, const unsigned int)
+		{
+			ar& make_array(m.data(), m.size());
+		}
+
+	} // namespace serialization
+} // namespace boost
 
 class SegPro {
 
