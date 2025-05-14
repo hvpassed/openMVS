@@ -1,4 +1,4 @@
-#define APPNAME _T("TestFaiss")
+#define APPNAME _T("RefineSeg")
 #include<faiss/IndexFlat.h>
 #include "../../libs/MVS.h"
 #include <fstream>
