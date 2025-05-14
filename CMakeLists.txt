@@ -3,7 +3,7 @@
 ########################################################################
 #
 # Project-wide settings
-CMAKE_MINIMUM_REQUIRED(VERSION 3.10)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.24)
 IF(POLICY CMP0011)
 	CMAKE_POLICY(SET CMP0011 NEW)
 ENDIF()
@@ -257,21 +257,33 @@ set(MKL_COMPONENTS
     intel_thread
     core
 )
+SET(FAISS_EXTRA_LIBS "")
 set(MKL_INTERFACE_FULL "intel_lp64")
 find_package(MKL REQUIRED COMPONENTS ${MKL_COMPONENTS})
 if(MKL_FOUND)
 	message(STATUS "Using Intel MKL for BLAS/LAPACK")
 	MESSAGE(STATUS "Intel MKL ${MKL_VERSION} found (libs: ${MKL_LIBRARIES})")
 	if(NOT MKL_LIBRARIES)
-        set(MKL_LIBRARIES
-            "${MKL_ROOT}/lib/mkl_intel_lp64_dll.lib"
-            "${MKL_ROOT}/lib/mkl_intel_thread_dll.lib"
-            "${MKL_ROOT}/lib/mkl_core_dll.lib"
-            "${MKL_ROOT}/../../compiler/latest/lib/libiomp5md.lib"
-        )
-        message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
+		if(MSVC)
+			set(MKL_LIBRARIES
+				"${MKL_ROOT}/lib/mkl_intel_lp64_dll.lib"
+				"${MKL_ROOT}/lib/mkl_intel_thread_dll.lib"
+				"${MKL_ROOT}/lib/mkl_core_dll.lib"
+				"${MKL_ROOT}/../../compiler/latest/lib/libiomp5md.lib"
+			)
+			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
+		else()
+			set(MKL_LIBRARIES
+				"${MKL_ROOT}/lib/libmkl_intel_lp64.a"
+				"${MKL_ROOT}/lib/libmkl_intel_thread.a"
+				"${MKL_ROOT}/lib/libmkl_core.a"
+				"${MKL_ROOT}/../../compiler/latest/lib/libiomp5.a"
+			)
+			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
+		endif()
     endif()
 	list(APPEND OpenMVS_EXTRA_LIBS ${MKL_LIBRARIES})
+	list(APPEND FAISS_EXTRA_LIBS ${MKL_LIBRARIES})
 else()
 	MESSAGE(STATUS "-- Can't find MKL. Please specify MKL directory using MKL_DIR variable")
 endif()
@@ -282,7 +294,7 @@ if(TARGET faiss)
     get_target_property(FAISS_INCLUDE_DIRS faiss INTERFACE_INCLUDE_DIRECTORIES)
     list(APPEND OpenMVS_EXTRA_INCLUDES ${FAISS_INCLUDE_DIRS})
     list(APPEND OpenMVS_EXTRA_LIBS faiss)
-    
+    list(APPEND FAISS_EXTRA_LIBS faiss)
     # GPU²¿·Ö
     if(OpenMVS_USE_CUDA)
         find_package(FAISS REQUIRED COMPONENTS faiss_gpu)
@@ -297,11 +309,16 @@ if(TARGET faiss)
                 ${CUDA_cudart_LIBRARY}
                 ${CUDA_curand_LIBRARY}
             )
-            
+            list(APPEND FAISS_EXTRA_LIBS 
+				${CUDA_cublas_LIBRARY}
+                ${CUDA_cudart_LIBRARY}
+                ${CUDA_curand_LIBRARY}
+			)
             # Ìí¼ÓOpenMP
             find_package(OpenMP REQUIRED)
             if(OpenMP_FOUND)
                 list(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
+				list(APPEND FAISS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
             endif()
             
             set(_USE_FAISS_GPU TRUE)

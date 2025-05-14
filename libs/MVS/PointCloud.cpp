@@ -244,9 +244,10 @@ namespace BasicPLY {
 		} views;
 		float confidence;
 		float scale;
-		PointCloud::SEGPRO s;
+		PointCloud::SEGMENT s;
 		static void InitLoadProps(PLY& ply, int elem_count,
-			PointCloud::PointArr& points, PointCloud::ColorArr& colors, PointCloud::NormalArr& normals, PointCloud::PointViewArr& views, PointCloud::PointWeightArr& weights)
+			PointCloud::PointArr& points, PointCloud::ColorArr& colors, PointCloud::NormalArr& normals, PointCloud::PointViewArr& views, PointCloud::PointWeightArr& weights,
+			PointCloud::SegmentArr& segments)
 		{
 			PLY::PlyElement* elm = ply.find_element(elem_names[0]);
 			const size_t nMaxProps(SizeOfArray(props));
@@ -260,11 +261,12 @@ namespace BasicPLY {
 				case 6: normals.resize((IDX)elem_count); break;
 				case 9: views.resize((IDX)elem_count); break;
 				case 10: weights.resize((IDX)elem_count); break;
+				case 16: segments.resize((IDX)elem_count); break;
 				}
 			}
 		}
 		static void InitSaveProps(PLY& ply, int elem_count,
-			bool bColors, bool bNormals, bool bViews, bool bWeights, bool bConfidence=false, bool bScale=false)
+			bool bColors, bool bNormals, bool bViews, bool bWeights, bool bConfidence=false, bool bScale=false,bool bSegment=false)
 		{
 			ply.describe_property(elem_names[0], 3, props+0);
 			if (bColors)
@@ -279,12 +281,14 @@ namespace BasicPLY {
 				ply.describe_property(elem_names[0], props[11]);
 			if (bScale)
 				ply.describe_property(elem_names[0], props[12]);
+			if (bSegment)
+				ply.describe_property(elem_names[0], props[16]);
 			if (elem_count)
 				ply.element_count(elem_names[0], elem_count);
 		}
-		static const PLY::PlyProperty props[16];
+		static const PLY::PlyProperty props[17];
 	};
-	const PLY::PlyProperty Vertex::props[16] = {
+	const PLY::PlyProperty Vertex::props[17] = {
 		{"x",             PLY::Float32, PLY::Float32, offsetof(Vertex,p.x), 0, 0, 0, 0},
 		{"y",             PLY::Float32, PLY::Float32, offsetof(Vertex,p.y), 0, 0, 0, 0},
 		{"z",             PLY::Float32, PLY::Float32, offsetof(Vertex,p.z), 0, 0, 0, 0},
@@ -302,7 +306,7 @@ namespace BasicPLY {
 		{"diffuse_red",   PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.r), 0, 0, 0, 0},
 		{"diffuse_green", PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.g), 0, 0, 0, 0},
 		{"diffuse_blue",  PLY::Uint8,   PLY::Uint8,   offsetof(Vertex,c.b), 0, 0, 0, 0},
-
+		{"segment",  PLY::Uint32,   PLY::Uint32,   offsetof(Vertex,s), 0, 0, 0, 0},
 	};
 } // namespace BasicPLY
 } // namespace PointCloudInternal
@@ -328,7 +332,7 @@ bool PointCloud::Load(const String& fileName)
 		int elem_count;
 		LPCSTR elem_name = ply.setup_element_read(i, &elem_count);
 		if (PLY::equal_strings(BasicPLY::elem_names[0], elem_name)) {
-			BasicPLY::Vertex::InitLoadProps(ply, elem_count, points, colors, normals, pointViews, pointWeights);
+			BasicPLY::Vertex::InitLoadProps(ply, elem_count, points, colors, normals, pointViews, pointWeights,segments);
 			BasicPLY::Vertex vertex;
 			for (int v=0; v<elem_count; ++v) {
 				ply.get_element(&vertex);
@@ -345,6 +349,8 @@ bool PointCloud::Load(const String& fileName)
 					WeightArr pw(vertex.views.num, vertex.views.pWeights);
 					pointWeights[v].CopyOfRemove(pw);
 				}
+				if (!segments.empty())
+					segments[v] = vertex.s;
 			}
 		} else {
 			ply.get_other_element();
@@ -542,7 +548,7 @@ bool PointCloud::SaveWithScale(const String& fileName, const ImageArr& images, f
 
 
 
-bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
+bool MVS::PointCloud::SaveWithSegments(const String& fileName,bool bBinary) const
 {
 	if (IsEmpty())
 		return false;
@@ -553,17 +559,13 @@ bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
 	Util::ensureFolder(fileName);
 	using namespace PointCloudInternal;
 	PLY ply;
-	if (!ply.write(fileName, 1, BasicPLY::elem_names,PLY::ASCII))
+ 
+	if (!ply.write(fileName, 1, BasicPLY::elem_names, bBinary?PLY::BINARY_LE:PLY::ASCII))
 		return false;
 
 	// write the header
 	BasicPLY::Vertex::InitSaveProps(ply, (int)points.size(), !colors.empty(), !normals.empty(),
-		!pointViews.empty(),!pointWeights.empty());
-	ply.describe_property(BasicPLY::elem_names[0], 16, BasicPLY::Vertex::props);
-	ply.describe_property(BasicPLY::elem_names[0], 17, BasicPLY::Vertex::props);
-	ply.describe_property(BasicPLY::elem_names[0], 18, BasicPLY::Vertex::props);
-	ply.describe_property(BasicPLY::elem_names[0], 19, BasicPLY::Vertex::props);
-	ply.describe_property(BasicPLY::elem_names[0], 20, BasicPLY::Vertex::props);
+		!pointViews.empty(), !pointWeights.empty(),false,false,true);
 	if (!ply.header_complete())
 		return false;
 
@@ -584,16 +586,11 @@ bool MVS::PointCloud::SaveWithSegments(const String& fileName) const
 			ASSERT(vertex.views.num == pointWeights[i].size());
 			vertex.views.pWeights = pointWeights[i].data();
 		}
-		if (!segmentsPro.empty()) {
-
-			FOREACH(i, segmentsPro) {
-				ply.put_element(&segmentsPro[i]);
-			}
+		if (!segments.empty()) {
+			vertex.s = segments[i];
 		}
 		ply.put_element(&vertex);
 	}
-
-
 	ASSERT(ply.get_current_element_count() == (int)points.size());
 
 	DEBUG_EXTRA("Point-cloud '%s' saved: %u points (%s)", Util::getFileNameExt(fileName).c_str(), points.GetSize(), TD_TIMER_GET_FMT().c_str());
@@ -767,9 +764,8 @@ void PointCloud::PrintStatistics(const Image* pImages, const OBB3f* pObb) const
 	);
 } // PrintStatistics
 
-MVS::PointCloud::SEGMENT MVS::PointCloud::ComputeSegments(const SegProVec& data, SEACAVE::IDX size)
+MVS::PointCloud::SEGMENT MVS::PointCloud::ComputeSegments(const SegProVec& data)
 {
-	SegProVec dive = data / (float)size;
 	int max = 0;
 	float maxVal = data[0];
 	for (int i = 1; i < SEG_CLASS; i++) {
@@ -779,7 +775,79 @@ MVS::PointCloud::SEGMENT MVS::PointCloud::ComputeSegments(const SegProVec& data,
 			maxVal = data[i];
 		}
 	}
-
-
 	return max;
+}
+
+
+void PointCloud::RefineSegments(faiss::idx_t * indices,size_t size, size_t k)
+{
+	ASSERT(size == this->points.size());
+	auto get_element = [=](size_t i, size_t j)->faiss::idx_t {
+		return indices[i * k + j];
+	};
+
+	std::atomic_size_t processed(0);
+	std::atomic_size_t updated(0);
+	const auto start_time = std::chrono::steady_clock::now();
+	const size_t report_interval = std::max<size_t>(1, size / 1000); // 每1%报告一次
+	std::cout << "Refine Segments..." << std::endl;
+	SegProArr newSegmentsPro;
+	newSegmentsPro.resize(segmentsPro.size());
+	
+	// 并行处理每个点
+	#pragma omp parallel for
+	for (int i = 0; i < static_cast<int>(size); ++i) {
+		// 获取当前点的原始概率
+		SEGPRO sumPro = SEGPRO::Zero(); // 初始化为当前点自己的概率
+
+		// 统计k个邻居的概率和
+		for (size_t j = 0; j < k; ++j) {
+			faiss::idx_t neighborIdx = get_element(i,j);
+			sumPro += segmentsPro[neighborIdx];
+		}
+
+		// 计算平均值 (包括自己共k+1个点)
+		SEGPRO avgPro = sumPro / (k);
+
+		// 存储新的概率值
+		newSegmentsPro[i] = avgPro;
+
+		if ((++processed % report_interval) == 0) {
+			#pragma omp critical
+			{
+				const auto current_time = std::chrono::steady_clock::now();
+				const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
+				const double speed = static_cast<double>(processed) / elapsed;
+				const double remaining = (size - processed) / (speed * 1000); // 剩余秒数
+
+				std::cout << "\rProgress: "
+					<< std::fixed << std::setprecision(1)
+					<< (processed * 100.0 / size) << "% "
+					<< "Remaining: " << std::setprecision(0) << remaining << "s"
+					<< " [" << std::string(processed * 50 / size, '=') << ">"
+					<< std::string(50 - (processed * 50 / size), ' ') << "]"
+					<< std::flush;
+			}
+		}
+	}
+	std::cout << "\nRefine computed " << std::endl;
+		// 原子性地更新所有概率值
+	segments.resize(size);
+	#pragma omp parallel for
+	for (int i = 0; i < static_cast<int>(size); ++i) {
+		if (PointCloud::ComputeSegments(segmentsPro[i]) != PointCloud::ComputeSegments(newSegmentsPro[i])) {
+			#pragma omp critical
+			{
+				++updated;
+			}
+		}
+		segmentsPro[i] = newSegmentsPro[i];
+		segments[i] = PointCloud::ComputeSegments(segmentsPro[i]);
+	}
+
+	const auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - start_time
+	).count() / 1000.0;
+	std::cout << "\nCompleted in " << std::fixed << std::setprecision(1) << total_time << "s with "<<updated<<" points updated\n";
+
 }
