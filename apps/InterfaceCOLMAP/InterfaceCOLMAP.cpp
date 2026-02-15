@@ -570,7 +570,12 @@ struct Point {
 			Track track;
 			in >> track.idImage >> track.idProj;
 			if (in.fail())
+			{
 				break;
+			}
+			if (!(track.idImage > 0 && track.idProj > 0)) {
+				std::cout << "Error: idImage-" << track.idImage << " idProj-" << track.idProj << std::endl;
+			}
 			ASSERT(track.idImage > 0 && track.idProj > 0);
 			--track.idImage; --track.idProj;
 			tracks.emplace_back(track);

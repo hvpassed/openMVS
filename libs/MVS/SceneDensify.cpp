@@ -2601,7 +2601,8 @@ bool Scene::saveImgRef(MVS::DenseDepthMapData& data) {
 
 				if (!depthData.IsValid()) {
 					VERBOSE("Invalid depth-map for image %u", i);
-					exit(1);
+					VERBOSE("Warning: Skipping invalid depth-map for image ID %u", i);
+					continue;
 				}
 
 				Image* refImg = depthData.images[0].pImageData;

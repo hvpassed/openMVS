@@ -315,8 +315,8 @@ if(TARGET faiss)
                 ${CUDA_curand_LIBRARY}
 			)
             # Ìí¼ÓOpenMP
-            find_package(OpenMP REQUIRED)
-            if(OpenMP_FOUND)
+            find_package(OpenMP REQUIRED COMPONENTS CXX)
+            if(OpenMP_CXX_FOUND)
                 list(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
 				list(APPEND FAISS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
             endif()
