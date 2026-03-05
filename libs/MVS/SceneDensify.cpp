@@ -2595,19 +2595,18 @@ bool Scene::saveImgRef(MVS::DenseDepthMapData& data) {
 		std::ofstream ofs("imgRef.txt");
 		if (ofs) {
 			ofs << "ID,Width,Height,Name" << std::endl;
-			FOREACH(i, data.depthMaps.arrDepthData) {
-				DepthData& depthData = data.depthMaps.arrDepthData[i];
+			FOREACH(i, data.scene.images) {
+				const Image& refImg = data.scene.images[i];
 
-
-				if (!depthData.IsValid()) {
-					VERBOSE("Invalid depth-map for image %u", i);
-					VERBOSE("Warning: Skipping invalid depth-map for image ID %u", i);
-					continue;
+				// 只要图片是有效的（OpenMVS加载进来了），就写入 ref
+				// 这样保证 ID 连续且完整
+				if (refImg.IsValid()) {
+					VERBOSE("ID %u Image size (%u %u) name %s", refImg.ID, refImg.width, refImg.height, refImg.name.c_str());
+					ofs << refImg.ID << "," << refImg.width << "," << refImg.height << "," << refImg.name.c_str() << std::endl;
 				}
-
-				Image* refImg = depthData.images[0].pImageData;
-				VERBOSE("ID %u  Image size (%u %u) depthmap name %s", refImg->ID, refImg->width, refImg->height, refImg->name.c_str());
-				ofs << refImg->ID << "," << refImg->width << "," << refImg->height << "," << refImg->name.c_str() << std::endl;
+				else {
+					VERBOSE("Found a invalid image %u",refImg.ID);
+				}
 			}
 			ofs.close();
 		}
