@@ -1908,7 +1908,11 @@ bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderRO
 
 	if (!ComputeDepthMaps(data))
 		return false;
-	
+	if (!skip) {
+		if (!Scene::saveImgRef(data)) {
+			exit(1);
+		}
+	}
 	if (ABS(nFusionMode) == 1)
 		return true;
 
