@@ -19,7 +19,9 @@ ENDIF()
 IF(POLICY CMP0146)
 	CMAKE_POLICY(SET CMP0146 OLD) # not required, but forced by OpenCV old support for CUDA
 ENDIF()
-
+IF(POLICY CMP0144)
+	CMAKE_POLICY(SET CMP0144 NEW)
+ENDIF()
 # List configuration options
 SET(OpenMVS_BUILD_TOOLS ON CACHE BOOL "Build example applications")
 SET(OpenMVS_USE_OPENMP ON CACHE BOOL "Enable OpenMP library")
@@ -100,17 +102,87 @@ if(OpenMVS_USE_OPENMP)
 	endif()
 endif()
 
-find_package(hdf5 REQUIRED)
-if(HDF5_FOUND)
-    LIST(APPEND OpenMVS_EXTRA_INCLUDES ${HDF5_INCLUDE_DIRS})
-    LIST(APPEND OpenMVS_EXTRA_LIBS "hdf5::hdf5-shared;hdf5::hdf5_hl-shared;hdf5::hdf5_cpp-shared;hdf5::hdf5_hl_cpp-shared")
-    INCLUDE_DIRECTORIES(${HDF5_INCLUDE_DIRS})
-    ADD_DEFINITIONS(${HDF5_DEFINITIONS})
-    SET(_USE_HDF5 TRUE)
-    MESSAGE(STATUS "HDF5 ${HDF5_VERSION} found (include: ${HDF5_INCLUDE_DIRS} lib: ${HDF5_LIBRARIES})")
-else()
-    MESSAGE(FATAL_ERROR "-- Can't find HDF5. Please specify HDF5 directory using HDF5_DIR variable")
+# find_package(hdf5 REQUIRED)
+# if(HDF5_FOUND)
+#     LIST(APPEND OpenMVS_EXTRA_INCLUDES ${HDF5_INCLUDE_DIRS})
+#     LIST(APPEND OpenMVS_EXTRA_LIBS "hdf5::hdf5-shared;hdf5::hdf5_hl-shared;hdf5::hdf5_cpp-shared;hdf5::hdf5_hl_cpp-shared")
+#     INCLUDE_DIRECTORIES(${HDF5_INCLUDE_DIRS})
+#     ADD_DEFINITIONS(${HDF5_DEFINITIONS})
+#     SET(_USE_HDF5 TRUE)
+#     MESSAGE(STATUS "HDF5 ${HDF5_VERSION} found (include: ${HDF5_INCLUDE_DIRS} lib: ${HDF5_LIBRARIES})")
+# else()
+#     MESSAGE(FATAL_ERROR "-- Can't find HDF5. Please specify HDF5 directory using HDF5_DIR variable")
+# endif()
+
+# ---------------- HDF5 (manual) ----------------
+set(HDF5_ROOT "$ENV{HOME}/.local" CACHE PATH "HDF5 install prefix")
+
+find_path(HDF5_INCLUDE_DIR
+    NAMES hdf5.h
+    PATHS "${HDF5_ROOT}/include"
+    NO_DEFAULT_PATH
+)
+
+find_library(HDF5_C_LIBRARY
+    NAMES hdf5
+    PATHS "${HDF5_ROOT}/lib"
+    NO_DEFAULT_PATH
+)
+
+find_library(HDF5_CPP_LIBRARY
+    NAMES hdf5_cpp
+    PATHS "${HDF5_ROOT}/lib"
+    NO_DEFAULT_PATH
+)
+
+find_library(HDF5_HL_LIBRARY
+    NAMES hdf5_hl
+    PATHS "${HDF5_ROOT}/lib"
+    NO_DEFAULT_PATH
+)
+
+find_library(HDF5_HL_CPP_LIBRARY
+    NAMES hdf5_hl_cpp
+    PATHS "${HDF5_ROOT}/lib"
+    NO_DEFAULT_PATH
+)
+
+if(NOT HDF5_INCLUDE_DIR)
+    message(FATAL_ERROR "HDF5 include dir not found: ${HDF5_ROOT}/include")
 endif()
+
+if(NOT HDF5_C_LIBRARY)
+    message(FATAL_ERROR "HDF5 C library not found: ${HDF5_ROOT}/lib/libhdf5*")
+endif()
+
+if(NOT HDF5_CPP_LIBRARY)
+    message(FATAL_ERROR "HDF5 C++ library not found: ${HDF5_ROOT}/lib/libhdf5_cpp*")
+endif()
+
+if(NOT HDF5_HL_LIBRARY)
+    message(FATAL_ERROR "HDF5 HL library not found: ${HDF5_ROOT}/lib/libhdf5_hl*")
+endif()
+
+if(NOT HDF5_HL_CPP_LIBRARY)
+    message(FATAL_ERROR "HDF5 HL C++ library not found: ${HDF5_ROOT}/lib/libhdf5_hl_cpp*")
+endif()
+
+list(APPEND OpenMVS_EXTRA_INCLUDES ${HDF5_INCLUDE_DIR})
+include_directories(${HDF5_INCLUDE_DIR})
+
+list(APPEND OpenMVS_EXTRA_LIBS
+    ${HDF5_C_LIBRARY}
+    ${HDF5_CPP_LIBRARY}
+    ${HDF5_HL_LIBRARY}
+    ${HDF5_HL_CPP_LIBRARY}
+)
+
+set(_USE_HDF5 TRUE)
+message(STATUS "Using manual HDF5")
+message(STATUS "HDF5 include: ${HDF5_INCLUDE_DIR}")
+message(STATUS "HDF5 libs: ${HDF5_C_LIBRARY};${HDF5_CPP_LIBRARY};${HDF5_HL_LIBRARY};${HDF5_HL_CPP_LIBRARY}")
+# ----------------------------------------------
+
 
 if(OpenMVS_USE_OPENGL)
 	FIND_PACKAGE(OpenGL)
@@ -216,20 +288,74 @@ if(OpenMVS_USE_PYTHON)
 	endif()
 endif()
 
-FIND_PACKAGE(Boost REQUIRED COMPONENTS iostreams program_options system serialization OPTIONAL_COMPONENTS ${Boost_EXTRA_COMPONENTS})
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD)
+endif()
+
+set(Boost_NO_BOOST_CMAKE ON)
+
+FIND_PACKAGE(Boost REQUIRED
+    COMPONENTS iostreams program_options serialization
+    OPTIONAL_COMPONENTS system ${Boost_EXTRA_COMPONENTS}
+)
+
 if(Boost_FOUND)
-	LIST(APPEND OpenMVS_EXTRA_INCLUDES ${Boost_INCLUDE_DIRS})
-	INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
-	ADD_DEFINITIONS(${Boost_DEFINITIONS})
-	LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
-	if(NOT MSVC AND DEFINED CMAKE_TOOLCHAIN_FILE)
-		# work around this missing library link in vcpkg
-		LIST(APPEND Boost_LIBRARIES zstd)
-	endif()
-	SET(_USE_BOOST TRUE)
-	if(OpenMVS_USE_PYTHON AND Boost_${Boost_EXTRA_COMPONENTS}_FOUND)
-		SET(_USE_BOOST_PYTHON TRUE)
-	endif()
+    LIST(APPEND OpenMVS_EXTRA_INCLUDES ${Boost_INCLUDE_DIRS})
+    INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+    ADD_DEFINITIONS(${Boost_DEFINITIONS})
+    LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
+
+    # ‰ºòÂÖà‰ΩøÁî® imported targets
+    if(TARGET Boost::iostreams)
+        LIST(APPEND OpenMVS_EXTRA_LIBS
+            Boost::iostreams
+            Boost::program_options
+            Boost::serialization
+        )
+
+        # Boost.System Âú® 1.86 ÈáåÈÄöÂ∏∏ÊòØ header-onlyÔºõÊúâ target ÊâçÈìæÊé•
+        if(TARGET Boost::system)
+            LIST(APPEND OpenMVS_EXTRA_LIBS Boost::system)
+        endif()
+    else()
+        LIST(APPEND OpenMVS_EXTRA_LIBS ${Boost_LIBRARIES})
+    endif()
+
+    # Python ÁªÑ‰ª∂
+    if(OpenMVS_USE_PYTHON)
+        set(_BOOST_PYTHON_FOUND FALSE)
+
+        foreach(_py_tgt
+            Boost::python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}
+            Boost::python${Python3_VERSION_MAJOR}
+            Boost::python
+        )
+            if(TARGET ${_py_tgt})
+                LIST(APPEND OpenMVS_EXTRA_LIBS ${_py_tgt})
+                set(_BOOST_PYTHON_FOUND TRUE)
+                break()
+            endif()
+        endforeach()
+
+        if(_BOOST_PYTHON_FOUND)
+            SET(_USE_BOOST_PYTHON TRUE)
+        else()
+            MESSAGE(WARNING "Boost.Python target not found; Python bindings will be disabled")
+        endif()
+    endif()
+
+    # zstd ÂÖúÂ∫ï
+    find_library(ZSTD_LIBRARY zstd
+        PATHS
+            $ENV{HOME}/.local/lib
+            /usr/lib64
+            /usr/lib/x86_64-linux-gnu
+    )
+    if(ZSTD_LIBRARY)
+        LIST(APPEND OpenMVS_EXTRA_LIBS ${ZSTD_LIBRARY})
+    endif()
+
+    SET(_USE_BOOST TRUE)
 endif()
 
 FIND_PACKAGE(Eigen3 3.4 REQUIRED)
@@ -288,49 +414,28 @@ else()
 	MESSAGE(STATUS "-- Can't find MKL. Please specify MKL directory using MKL_DIR variable")
 endif()
 
-find_package(FAISS REQUIRED COMPONENTS faiss)
+find_package(FAISS REQUIRED)
+
 if(TARGET faiss)
-    # CPU≤ø∑÷
     get_target_property(FAISS_INCLUDE_DIRS faiss INTERFACE_INCLUDE_DIRECTORIES)
     list(APPEND OpenMVS_EXTRA_INCLUDES ${FAISS_INCLUDE_DIRS})
     list(APPEND OpenMVS_EXTRA_LIBS faiss)
     list(APPEND FAISS_EXTRA_LIBS faiss)
-    # GPU≤ø∑÷
+    set(_USE_FAISS TRUE)
+
     if(OpenMVS_USE_CUDA)
-        find_package(FAISS REQUIRED COMPONENTS faiss_gpu)
         if(TARGET faiss_gpu)
             get_target_property(FAISS_GPU_INCLUDE_DIRS faiss_gpu INTERFACE_INCLUDE_DIRECTORIES)
             list(APPEND OpenMVS_EXTRA_INCLUDES ${FAISS_GPU_INCLUDE_DIRS})
             list(APPEND OpenMVS_EXTRA_LIBS faiss_gpu)
-            
-            # ÃÌº”CUDA“¿¿µ
-            list(APPEND OpenMVS_EXTRA_LIBS
-                ${CUDA_cublas_LIBRARY}
-                ${CUDA_cudart_LIBRARY}
-                ${CUDA_curand_LIBRARY}
-            )
-            list(APPEND FAISS_EXTRA_LIBS 
-				${CUDA_cublas_LIBRARY}
-                ${CUDA_cudart_LIBRARY}
-                ${CUDA_curand_LIBRARY}
-			)
-            # ÃÌº”OpenMP
-            find_package(OpenMP REQUIRED COMPONENTS CXX)
-            if(OpenMP_CXX_FOUND)
-                list(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
-				list(APPEND FAISS_EXTRA_LIBS ${OpenMP_CXX_LIBRARIES})
-            endif()
-            
             set(_USE_FAISS_GPU TRUE)
-            message(STATUS "FAISS-GPU enabled with CUDA support")
+            message(STATUS "FAISS-GPU enabled with separate faiss_gpu target")
         else()
-            message(WARNING "FAISS-GPU not found - falling back to CPU only")
+            message(WARNING "No separate faiss_gpu target exported by FAISS; using faiss only")
         endif()
     endif()
-    
-    set(_USE_FAISS TRUE)
 else()
-    message(FATAL_ERROR "FAISS not found - required for OpenMVS")
+    message(FATAL_ERROR "FAISS target not found")
 endif()
 
 LIST(REMOVE_DUPLICATES OpenMVS_EXTRA_INCLUDES)

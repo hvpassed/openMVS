@@ -1,0 +1,15 @@
+cmake .. -GNinja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBOOST_ROOT=$HOME/.local \
+  -DBOOST_INCLUDEDIR=$HOME/.local/include \
+  -DBOOST_LIBRARYDIR=$HOME/.local/lib \
+  -DCMAKE_CUDA_COMPILER=$HOME/cuda-12.6/bin/nvcc \
+  -DCUDAToolkit_ROOT=$HOME/cuda-12.6 \
+  -DCUDA_TOOLKIT_ROOT_DIR=$HOME/cuda-12.6 \
+  -DCMAKE_CUDA_ARCHITECTURES=89 \
+  -DHDF5_ROOT=$HOME/.local \
+  -DCMAKE_PREFIX_PATH=$HOME/.local \
+  -DOpenMVS_USE_CUDA=ON \
+  -DOpenMVS_USE_PYTHON=ON \
+  -DOpenMVS_USE_OPENGL=OFF \
+  -DVCG_ROOT=$HOME/dep/vcglib
