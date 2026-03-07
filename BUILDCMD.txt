@@ -12,4 +12,29 @@ cmake .. -GNinja \
   -DOpenMVS_USE_CUDA=ON \
   -DOpenMVS_USE_PYTHON=ON \
   -DOpenMVS_USE_OPENGL=OFF \
+  -DCGAL_DIR=$CGAL_DIR \
   -DVCG_ROOT=$HOME/dep/vcglib
+
+
+  cmake .. -GNinja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CUDA_COMPILER=$HOME/cuda-12.6/bin/nvcc \
+  -DCUDAToolkit_ROOT=$HOME/cuda-12.6 \
+  -DCUDA_TOOLKIT_ROOT_DIR=$HOME/cuda-12.6 \
+  -DCMAKE_CUDA_ARCHITECTURES=89 \
+  -DBOOST_ROOT=$HOME/.local \
+  -DBOOST_INCLUDEDIR=$HOME/.local/include \
+  -DBOOST_LIBRARYDIR=$HOME/.local/lib \
+  -DHDF5_ROOT=$HOME/.local \
+  -DOpenCV_DIR=$HOME/.local/lib/cmake/opencv4 \
+  -DEigen3_DIR=$HOME/.local/share/eigen3/cmake \
+  -DFAISS_DIR=$HOME/.local/share/faiss \
+  -DMKL_ROOT=$HOME/intel/oneapi/mkl/2025.3 \
+  -DPython3_EXECUTABLE=/usr/bin/python3.12 \
+  -DVCG_ROOT=$HOME/dep/vcglib \
+  -DOpenMVS_USE_CUDA=ON \
+  -DOpenMVS_USE_PYTHON=OFF \
+  -DOpenMVS_USE_OPENGL=OFF \
+  -DCMAKE_BUILD_RPATH="$HOME/.local/lib;$HOME/cuda-12.6/lib64;$LIBAEC_LIBDIR" \
+  -DCMAKE_INSTALL_RPATH="\$ORIGIN/../lib;$HOME/.local/lib;$HOME/cuda-12.6/lib64;$LIBAEC_LIBDIR" \
+  -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON

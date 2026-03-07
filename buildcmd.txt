@@ -1,0 +1,51 @@
+cmake .. \
+    -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$HOME/.local;$(spack location -i cgal 2>/dev/null)" \
+    -DCMAKE_CUDA_COMPILER=/data/home/cwk/cuda-12.6/bin/nvcc \
+    -DCUDA_TOOLKIT_ROOT_DIR=/data/home/cwk/cuda-12.6 \
+    -DCUDAToolkit_ROOT=/data/home/cwk/cuda-12.6 \
+    -DCMAKE_CUDA_ARCHITECTURES=89 \
+    -DBoost_DIR="$HOME/.local/lib/cmake/Boost-1.90.0" \
+    -DVCG_ROOT="$HOME/dep/vcglib" \
+    -DOpenMVS_USE_CUDA=ON \
+    -DOpenMVS_USE_PYTHON=ON \
+    -DOpenMVS_USE_OPENGL=OFF \
+    -DCUDA_CUDA_LIBRARY="/data/home/cwk/cuda-12.6/targets/x86_64-linux/lib/stubs/libcuda.so" \
+    -DHDF5_FOUND=YES \
+    -DHDF5_LIBRARIES="-L$HOME/.local/lib -lhdf5 -lhdf5_cpp" \
+    -DHDF5_INCLUDE_DIRS="$HOME/.local/include" \
+    -DFAISS_FOUND=YES \
+    -DFAISS_GPU_FOUND=YES \
+    -DFAISS_LIBRARIES="-L$HOME/.local/lib -lfaiss" \
+    -DFAISS_GPU_LIBRARY="$HOME/.local/lib/libfaiss_gpu.so" \
+    -DOpenMVS_USE_CERES=ON \
+    -Wno-dev
+
+cmake .. \
+    -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH=$HOME/.local
+
+
+packages:
+    eigen:
+      externals:
+      - spec: eigen@3.4.0
+        prefix: /data/home/cwk/.local
+      buildable: false
+      
+    boost:
+      externals:
+      - spec: boost@1.90.0+python+iostreams+serialization+system+program_options
+        prefix: /data/home/cwk/.local
+      buildable: false
+
+    cuda:
+      externals:
+      - spec: cuda@12.6.20
+        prefix: /data/home/cwk/cuda-12.6
+      buildable: false
+
+    hdf5:
+      require: "~mpi+cxx"
