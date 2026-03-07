@@ -58,6 +58,7 @@ String strCropROIFileName;
 String strDenseConfigFileName;
 String strExportDepthMapsName;
 String strMaskPath;
+String strSegProH5Path;
 float fMaxSubsceneArea;
 float fSampleMesh;
 float fBorderROI;
@@ -153,6 +154,7 @@ bool Application::Initialize(size_t argc, LPCTSTR* argv)
 		("number-views-fuse", boost::program_options::value(&nMinViewsFuse)->default_value(2), "minimum number of images that agrees with an estimate during fusion in order to consider it inlier (<2 - only merge depth-maps)")
 		("ignore-mask-label", boost::program_options::value(&nIgnoreMaskLabel)->default_value(-1), "label value to ignore in the image mask, stored in the MVS scene or next to each image with '.mask.png' extension (<0 - disabled)")
 		("mask-path", boost::program_options::value<std::string>(&OPT::strMaskPath), "path to folder containing mask images with '.mask.png' extension")
+		("segpro-h5", boost::program_options::value<std::string>(&OPT::strSegProH5Path)->default_value("dense/pro/mat.h5"), "path to segmentation HDF5 file (mat.h5)")
 		("iters", boost::program_options::value(&nEstimationIters)->default_value(numIters), "number of patch-match iterations")
 		("geometric-iters", boost::program_options::value(&nEstimationGeometricIters)->default_value(2), "number of geometric consistent patch-match iterations (0 - disabled)")
 		("estimate-colors", boost::program_options::value(&nEstimateColors)->default_value(2), "estimate the colors for the dense point-cloud (0 - disabled, 1 - final, 2 - estimate)")
@@ -238,6 +240,8 @@ bool Application::Initialize(size_t argc, LPCTSTR* argv)
 	Util::ensureValidPath(OPT::strExportROIFileName);
 	Util::ensureValidPath(OPT::strImportROIFileName);
 	Util::ensureValidPath(OPT::strCropROIFileName);
+	if (!OPT::strSegProH5Path.empty())
+		OPT::strSegProH5Path = MAKE_PATH_SAFE(OPT::strSegProH5Path);
 	if (OPT::strOutputFileName.empty())
 		OPT::strOutputFileName = Util::getFileFullName(OPT::strInputFileName) + _T("_dense.mvs");
 
@@ -436,7 +440,7 @@ int main(int argc, LPCTSTR* argv)
 		if ((ARCHIVE_TYPE)OPT::nArchiveType == ARCHIVE_MVS)
 			sparsePointCloud = scene.pointcloud;
 		TD_TIMER_START();
-		if (!scene.DenseReconstruction(OPT::nFusionMode, OPT::bCrop2ROI, OPT::fBorderROI, OPT::bSkipImageRef)) {
+		if (!scene.DenseReconstruction(OPT::nFusionMode, OPT::bCrop2ROI, OPT::fBorderROI, OPT::bSkipImageRef, OPT::strSegProH5Path)) {
 			if (ABS(OPT::nFusionMode) != 1)
 				return EXIT_FAILURE;
 			VERBOSE("Depth-maps estimated (%s)", TD_TIMER_GET_FMT().c_str());

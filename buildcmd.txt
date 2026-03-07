@@ -1,6 +1,7 @@
 cmake .. \
     -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=$HOME/.local \
     -DCMAKE_PREFIX_PATH="$HOME/.local;$(spack location -i cgal 2>/dev/null)" \
     -DCMAKE_CUDA_COMPILER=/data/home/cwk/cuda-12.6/bin/nvcc \
     -DCUDA_TOOLKIT_ROOT_DIR=/data/home/cwk/cuda-12.6 \

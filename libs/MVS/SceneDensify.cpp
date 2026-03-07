@@ -1716,7 +1716,7 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 					fusedNormal += Cast<double>(normal);
 				if (bEstimateColor)
 					fusedColor += Cast<float>(image.pImageData->image(x));
-				//¼ÆËãÓïÒå
+				//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 				fusedSegData += segData.getSegProData(x.x,x.y);
 
 
@@ -1900,7 +1900,7 @@ void DenseDepthMapData::SignalCompleteDepthmapFilter()
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
 
-bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI,bool skip)
+bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI, bool skip, const String& segProH5Path)
 {
 	DenseDepthMapData data(*this, nFusionMode);
 
@@ -1925,7 +1925,7 @@ bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderRO
 	}
 
 
-	data.depthMaps.arrSegProData = readFromHDF5();
+	data.depthMaps.arrSegProData = readFromHDF5(segProH5Path);
 	VERBOSE("End read");
 	switch (OPTDENSE::nFuseFilter) {
 	case OPTDENSE::FUSE_NOFILTER:
@@ -2602,8 +2602,8 @@ bool Scene::saveImgRef(MVS::DenseDepthMapData& data) {
 			FOREACH(i, data.scene.images) {
 				const Image& refImg = data.scene.images[i];
 
-				// Ö»ÒªÍ¼Æ¬ÊÇÓÐÐ§µÄ£¨OpenMVS¼ÓÔØ½øÀ´ÁË£©£¬¾ÍÐ´Èë ref
-				// ÕâÑù±£Ö¤ ID Á¬ÐøÇÒÍêÕû
+				// Ö»ÒªÍ¼Æ¬ï¿½ï¿½ï¿½ï¿½Ð§ï¿½Ä£ï¿½OpenMVSï¿½ï¿½ï¿½Ø½ï¿½ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ ref
+				// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¤ ID ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 				if (refImg.IsValid()) {
 					VERBOSE("ID %u Image size (%u %u) name %s", refImg.ID, refImg.width, refImg.height, refImg.name.c_str());
 					ofs << refImg.ID << "," << refImg.width << "," << refImg.height << "," << refImg.name.c_str() << std::endl;

@@ -8,7 +8,7 @@
 #include"../MVS/Common.h"
 #include <fstream>
 #include<sstream>
-// ÆäËû´úÂë
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #include <libs/MVS/Image.h>
 
 #include <boost/serialization/serialization.hpp>
@@ -101,10 +101,11 @@ public:
 
 
 typedef MVS_API SEACAVE::cList< SegPro, const SegPro&, 1, 16, MVS::IIndex> SegProArr;
-static SegProArr readFromHDF5() {
+static SegProArr readFromHDF5(const SEACAVE::String& h5Path, const SEACAVE::String& imgRefPath = _T("imgRef.txt")) {
 	SegProArr ret;
-	std::ifstream imgRefFile("imgRef.txt");
-	H5::H5File file("dense\\pro\\mat.h5", H5F_ACC_RDONLY, H5P_DEFAULT, H5P_DEFAULT);
+	const SEACAVE::String h5FilePath = h5Path.empty() ? _T("dense/pro/mat.h5") : h5Path;
+	std::ifstream imgRefFile(imgRefPath.c_str());
+	H5::H5File file(h5FilePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT, H5P_DEFAULT);
 	if (imgRefFile) {
 		std::string line;
 		std::getline(imgRefFile, line);
@@ -130,11 +131,9 @@ static SegProArr readFromHDF5() {
 			ret.push_back(segPro);
 		}
 
+	} else {
+		return ret;
 	}
-	else {
-		return NULL;
-	}
-
 
 	return ret;
 };
