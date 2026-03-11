@@ -41,7 +41,8 @@ OPTION(OpenMVS_USE_SSE "Enable SSE optimizations" ON)
 OPTION(OpenMVS_MAX_CUDA_COMPATIBILITY "Build for maximum CUDA device compatibility" OFF)
 OPTION(OpenMVS_ENABLE_IPO "Whether to enable interprocedural optimization" ON)
 OPTION(OpenMVS_ENABLE_TESTS "Enable test code" ON)
-
+OPTION(OpenMVS_USE_HDF5 "Enable HDF5 library support" ON)
+OPTION(OpenMVS_USE_FAISS "Enable FAISS library support" ON)
 # Disable CUDA on MacOS
 IF(APPLE)
 	SET(OpenMVS_USE_CUDA OFF)
@@ -264,6 +265,92 @@ if(OpenCV_FOUND)
 	MESSAGE(STATUS "OpenCV ${OpenCV_VERSION} found")
 else()
 	MESSAGE(STATUS "Can't find OpenCV. Please specify OpenCV directory using OpenCV_DIR variable")
+endif()
+
+if(OpenMVS_USE_HDF5)
+	# 如果你只用 C API，可改成: COMPONENTS C HL
+	find_package(HDF5 COMPONENTS C CXX HL QUIET)
+
+	if(HDF5_FOUND)
+		# 兼容 CMake >= 3.19 的 imported targets
+		if(TARGET HDF5::HDF5)
+			list(APPEND OpenMVS_EXTRA_LIBS HDF5::HDF5)
+		elseif(TARGET hdf5::hdf5_hl_cpp)
+			list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_hl_cpp)
+		elseif(TARGET hdf5::hdf5_cpp)
+			list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_cpp)
+			if(TARGET hdf5::hdf5_hl)
+				list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_hl)
+			endif()
+		else()
+			# 兼容旧模式
+			include_directories(${HDF5_INCLUDE_DIRS})
+			add_definitions(${HDF5_DEFINITIONS})
+			list(APPEND OpenMVS_EXTRA_LIBS ${HDF5_LIBRARIES})
+		endif()
+
+		set(_USE_HDF5 TRUE)
+		message(STATUS "HDF5 ${HDF5_VERSION} found")
+	else()
+		message(STATUS "Can't find HDF5. Continuing without it.")
+	endif()
+endif()
+
+if(OpenMVS_USE_FAISS)
+	unset(FAISS_FOUND)
+	unset(FAISS_INCLUDE_DIR CACHE)
+	unset(FAISS_LIBRARY CACHE)
+
+	# 先尝试 config package（名字大小写两种都试一下）
+	find_package(faiss CONFIG QUIET)
+	find_package(Faiss CONFIG QUIET)
+
+	if(TARGET faiss)
+		list(APPEND OpenMVS_EXTRA_LIBS faiss)
+		set(FAISS_FOUND TRUE)
+
+		# 如果安装的是 GPU 版，通常会安装这个头
+		if(EXISTS "${CMAKE_INSTALL_PREFIX}/include/faiss/gpu/StandardGpuResources.h")
+			set(_USE_FAISS_GPU TRUE)
+		endif()
+
+	elseif(TARGET Faiss::faiss)
+		list(APPEND OpenMVS_EXTRA_LIBS Faiss::faiss)
+		set(FAISS_FOUND TRUE)
+
+	else()
+		# 手动 fallback：兼容只有头文件+库文件、没有 CMake config 的安装
+		find_path(FAISS_INCLUDE_DIR
+			NAMES faiss/Index.h
+			PATH_SUFFIXES include
+		)
+
+		find_library(FAISS_LIBRARY
+			NAMES faiss
+			PATH_SUFFIXES lib lib64
+		)
+
+		if(FAISS_INCLUDE_DIR AND FAISS_LIBRARY)
+			add_library(faiss_external UNKNOWN IMPORTED)
+			set_target_properties(faiss_external PROPERTIES
+				IMPORTED_LOCATION "${FAISS_LIBRARY}"
+				INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+			)
+			list(APPEND OpenMVS_EXTRA_LIBS faiss_external)
+			set(FAISS_FOUND TRUE)
+
+			if(EXISTS "${FAISS_INCLUDE_DIR}/faiss/gpu/StandardGpuResources.h")
+				set(_USE_FAISS_GPU TRUE)
+			endif()
+		endif()
+	endif()
+
+	if(FAISS_FOUND)
+		set(_USE_FAISS TRUE)
+		message(STATUS "FAISS found")
+	else()
+		message(STATUS "Can't find FAISS. Continuing without it.")
+	endif()
 endif()
 
 LIST(REMOVE_DUPLICATES OpenMVS_EXTRA_LIBS)

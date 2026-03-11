@@ -1,0 +1,20 @@
+cmake .. -GNinja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DVCG_ROOT="/data/home/cwk/dep/vcglib" \
+    -DCMAKE_PREFIX_PATH="$HOME/.local" \
+    -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
+    -DCMAKE_LIBRARY_PATH=$HOME/.local/lib \
+    -DCMAKE_EXE_LINKER_FLAGS="-L$HOME/.local/lib" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-L$HOME/.local/lib" \
+    -DOpenMVS_ENABLE_IPO=ON \
+    -DOpenMVS_USE_OPENMP=ON \
+    -DBREAKPAD_ROOT="$HOME/.local" \
+    -DOpenMVS_USE_CUDA=ON \
+    -DOpenMVS_MAX_CUDA_COMPATIBILITY=OFF \
+    -DOpenMVS_USE_SSE=ON \
+    -DOpenMVS_USE_BREAKPAD=ON \
+    -DOpenMVS_USE_FAST_FLOAT2INT=ON \
+    -DOpenMVS_USE_FAST_CBRT=ON \
+    -DOpenMVS_USE_FAST_INVSQRT=OFF \
+    -DOpenMVS_USE_CERES=ON
+    
