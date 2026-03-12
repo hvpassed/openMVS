@@ -229,6 +229,7 @@ if(OpenMVS_USE_PYTHON)
 	if(Python3_FOUND)
 		LIST(APPEND OpenMVS_EXTRA_LIBS ${Python3_LIBRARIES})
 		LIST(APPEND Boost_EXTRA_COMPONENTS python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR})
+		INCLUDE_DIRECTORIES(${Python3_INCLUDE_DIRS})
 		MESSAGE(STATUS "Python ${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR} found (include: ${Python3_INCLUDE_DIRS})")
 	else()
 		MESSAGE(STATUS "Can't find Python. Continuing without it.")
@@ -291,17 +292,15 @@ if(MKL_FOUND)
 		if(MSVC)
 			set(MKL_LIBRARIES
 				"${MKL_ROOT}/lib/mkl_intel_lp64_dll.lib"
-				"${MKL_ROOT}/lib/mkl_intel_thread_dll.lib"
-				"${MKL_ROOT}/lib/mkl_core_dll.lib"
-				"${MKL_ROOT}/../../compiler/latest/lib/libiomp5md.lib"
+                "${MKL_ROOT}/lib/mkl_sequential_dll.lib"
+                "${MKL_ROOT}/lib/mkl_core_dll.lib"
 			)
 			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
 		else()
 			set(MKL_LIBRARIES
-				"${MKL_ROOT}/lib/libmkl_intel_lp64.a"
-				"${MKL_ROOT}/lib/libmkl_intel_thread.a"
-				"${MKL_ROOT}/lib/libmkl_core.a"
-				"${MKL_ROOT}/../../compiler/latest/lib/libiomp5.a"
+				"${MKL_ROOT}/lib/libmkl_intel_lp64.so"
+                "${MKL_ROOT}/lib/libmkl_sequential.so"
+                "${MKL_ROOT}/lib/libmkl_core.so"
 			)
 			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
 		endif()

@@ -36,7 +36,7 @@
 // I N C L U D E S /////////////////////////////////////////////////
 
 #include "SemiGlobalMatcher.h"
-#include "../../libs/IO/SegPro.h"
+#include "../../libs/MVS/SegPro.h"
 
 // S T R U C T S ///////////////////////////////////////////////////
 

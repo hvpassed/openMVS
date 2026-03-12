@@ -4,7 +4,7 @@
 //#include<iostream>
 //
 //#include <fstream>
-//#include"../../libs/IO/SegPro.h"
+//#include"../../libs/MVS/SegPro.h"
 //
 //
 //bool fileExists(const std::string& filename) {
@@ -14,19 +14,19 @@
 //
 //void listDatasets(hid_t group_id, const std::string& path = "/") {
 //    hsize_t num_objs;
-//    H5Gget_num_objs(group_id, &num_objs); // »ñÈ¡×éÄÚ¶ÔÏóµÄÊýÁ¿
+//    H5Gget_num_objs(group_id, &num_objs); // ï¿½ï¿½È¡ï¿½ï¿½ï¿½Ú¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //
 //    for (hsize_t i = 0; i < num_objs; i++) {
 //        char obj_name[1024];
-//        H5Gget_objname_by_idx(group_id, i, obj_name, sizeof(obj_name)); // »ñÈ¡¶ÔÏóÃû³Æ
+//        H5Gget_objname_by_idx(group_id, i, obj_name, sizeof(obj_name)); // ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //
-//        int obj_type = H5Gget_objtype_by_idx(group_id, i); // »ñÈ¡¶ÔÏóÀàÐÍ
+//        int obj_type = H5Gget_objtype_by_idx(group_id, i); // ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //
 //        if (obj_type == H5G_GROUP) {
 //            std::cout << "[Group] " << path + obj_name << "/" << std::endl;
 //            hid_t subgroup_id = H5Gopen(group_id, obj_name, H5P_DEFAULT);
 //            if (subgroup_id >= 0) {
-//                listDatasets(subgroup_id, path + obj_name + "/"); // µÝ¹é±éÀú×Ó×é
+//                listDatasets(subgroup_id, path + obj_name + "/"); // ï¿½Ý¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //                H5Gclose(subgroup_id);
 //            }
 //        }
@@ -37,7 +37,7 @@
 //}
 //
 ////int main() {
-////    const std::string filename = "E:\\workspace\\dataset\\mat.h5";  // ÄãµÄ HDF5 ÎÄ¼þÂ·¾¶
+////    const std::string filename = "E:\\workspace\\dataset\\mat.h5";  // ï¿½ï¿½ï¿½ HDF5 ï¿½Ä¼ï¿½Â·ï¿½ï¿½
 ////    if (!fileExists(filename)) {
 ////        std::cerr << "Error: File does not exist: " << filename << std::endl;
 ////        return 1;
@@ -49,7 +49,7 @@
 ////    try {
 ////        H5::H5File file(filename, H5F_ACC_RDONLY, H5P_DEFAULT, H5P_DEFAULT);
 ////        std::cout << "Datasets in HDF5 file: " << filename << std::endl;
-////        listDatasets(file.getId()); // ±éÀúÊý¾Ý¼¯
+////        listDatasets(file.getId()); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý¼ï¿½
 ////    }
 ////    catch (H5::Exception& err) {
 ////        std::cerr << "HDF5 error: " << err.getDetailMsg() << std::endl;
@@ -108,12 +108,12 @@
 // //
 // //   std::vector<float> data(dims[0] * dims[1] * dims[2]);
 //
-// //   // ¶ÁÈ¡Êý¾Ý
+// //   // ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½
 // //   dataset.read(data.data(), H5::PredType::NATIVE_FLOAT);
 // //   SegProArr test;
 //	//test.Resize(1);
 //	//test[0] = SegPro(data);
-// //   // Êä³öÊý¾Ý
+// //   // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //	//printf("%d %d %d", dims[0], dims[1], dims[2]);
 //	//printf("data[0] = %f\n", test[0].getPixel(0,0,0));
 //	//H5Dclose(dataset.getId());
@@ -134,59 +134,59 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
 
-// Éú³ÉËæ»úÊý¾Ý
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 std::vector<float> generate_random_data(int num_vectors, int dim) {
     std::vector<float> data(num_vectors * dim);
     for (auto& v : data) {
-        v = static_cast<float>(rand()) / RAND_MAX; // [0,1)Ëæ»úÊý
+        v = static_cast<float>(rand()) / RAND_MAX; // [0,1)ï¿½ï¿½ï¿½ï¿½ï¿½
     }
     return data;
 }
 
 void test_faiss_gpu() {
-    const int dim = 128;          // ÏòÁ¿Î¬¶È
-    const int num_vectors = 3993600; // Êý¾Ý¿â´óÐ¡
-    const int num_queries = 10;    // ²éÑ¯ÊýÁ¿
-    const int k = 5;              // ·µ»Ø×î½üÁÚÊýÁ¿
-    const int nprobe = 10;        // ËÑË÷µÄ¾ÛÀàÖÐÐÄÊý
+    const int dim = 128;          // ï¿½ï¿½ï¿½ï¿½Î¬ï¿½ï¿½
+    const int num_vectors = 3993600; // ï¿½ï¿½ï¿½Ý¿ï¿½ï¿½Ð¡
+    const int num_queries = 10;    // ï¿½ï¿½Ñ¯ï¿½ï¿½ï¿½ï¿½
+    const int k = 5;              // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    const int nprobe = 10;        // ï¿½ï¿½ï¿½ï¿½ï¿½Ä¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    // 1. Éú³É²âÊÔÊý¾Ý
+    // 1. ï¿½ï¿½ï¿½É²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     auto database = generate_random_data(num_vectors, dim);
     auto queries = generate_random_data(num_queries, dim);
 
-    // 2. ´´½¨CPUË÷Òý£¨ÓÃÓÚ»ù×¼±È½Ï£©
+    // 2. ï¿½ï¿½ï¿½ï¿½CPUï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú»ï¿½×¼ï¿½È½Ï£ï¿½
     faiss::IndexFlatL2 cpu_index(dim);
 
-    // 3. ´´½¨GPU×ÊÔ´
+    // 3. ï¿½ï¿½ï¿½ï¿½GPUï¿½ï¿½Ô´
     faiss::gpu::StandardGpuResources gpu_res;
 
-    // 4. ÅäÖÃGPUË÷Òý²ÎÊý
+    // 4. ï¿½ï¿½ï¿½ï¿½GPUï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     faiss::gpu::GpuIndexIVFFlatConfig config;
-    config.device = 0; // Ê¹ÓÃµÚÒ»¸öGPU
+    config.device = 0; // Ê¹ï¿½Ãµï¿½Ò»ï¿½ï¿½GPU
 
-    // 5. ´´½¨GPUË÷Òý
+    // 5. ï¿½ï¿½ï¿½ï¿½GPUï¿½ï¿½ï¿½ï¿½
     auto gpu_index = faiss::gpu::GpuIndexIVFFlat(
         &gpu_res,
         dim,
-        1024,  // ¾ÛÀàÖÐÐÄÊýÁ¿
+        1024,  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         faiss::METRIC_L2,
         config
     );
 
-    // 6. ÑµÁ·Ë÷Òý
+    // 6. Ñµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     auto train_start = std::chrono::high_resolution_clock::now();
     gpu_index.train(num_vectors, database.data());
     auto train_end = std::chrono::high_resolution_clock::now();
 
-    // 7. Ìí¼ÓÊý¾Ýµ½Ë÷Òý
+    // 7. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½ï¿½ï¿½ï¿½ï¿½
     auto add_start = std::chrono::high_resolution_clock::now();
     gpu_index.add(num_vectors, database.data());
     auto add_end = std::chrono::high_resolution_clock::now();
 
-    // 8. ÉèÖÃËÑË÷²ÎÊý
+    // 8. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     gpu_index.nprobe = nprobe;
 
-    // 9. Ö´ÐÐËÑË÷£¨GPU£©
+    // 9. Ö´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½GPUï¿½ï¿½
     std::vector<faiss::idx_t> gpu_labels(num_queries * k);
     std::vector<float> gpu_distances(num_queries * k);
 
@@ -200,7 +200,7 @@ void test_faiss_gpu() {
     );
     auto search_end = std::chrono::high_resolution_clock::now();
 
-    // 10. CPUÑéÖ¤
+    // 10. CPUï¿½ï¿½Ö¤
     cpu_index.add(num_vectors, database.data());
     std::vector<faiss::idx_t> cpu_labels(num_queries * k);
     std::vector<float> cpu_distances(num_queries * k);
@@ -212,18 +212,18 @@ void test_faiss_gpu() {
         cpu_labels.data()
     );
 
-    // ¼ÆÊ±½á¹û
+    // ï¿½ï¿½Ê±ï¿½ï¿½ï¿½
     auto train_time = std::chrono::duration_cast<std::chrono::milliseconds>(train_end - train_start);
     auto add_time = std::chrono::duration_cast<std::chrono::milliseconds>(add_end - add_start);
     auto search_time = std::chrono::duration_cast<std::chrono::milliseconds>(search_end - search_start);
 
-    // ´òÓ¡½á¹û
+    // ï¿½ï¿½Ó¡ï¿½ï¿½ï¿½
     printf("[GPU Timing]\n");
     printf("Training: %lld ms\n", train_time.count());
     printf("Adding data: %lld ms\n", add_time.count());
     printf("Searching: %lld ms\n\n", search_time.count());
 
-    // ÑéÖ¤Ç°5¸ö²éÑ¯½á¹û
+    // ï¿½ï¿½Ö¤Ç°5ï¿½ï¿½ï¿½ï¿½Ñ¯ï¿½ï¿½ï¿½
     const int check_queries = 5;
     printf("[Result Validation (first %d queries)]\n", check_queries);
     for (int q = 0; q < check_queries; ++q) {

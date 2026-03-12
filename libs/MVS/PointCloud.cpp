@@ -444,7 +444,7 @@ bool PointCloud::LoadPLY(const String& fileName)
 {
 	ASSERT(!fileName.empty());
 	Release();
-
+	TD_TIMER_STARTD();
 	// open PLY file and read header
 	using namespace PointCloudInternal;
 	PLY ply;
@@ -651,7 +651,7 @@ bool PointCloud::SavePLY(const String& fileName, bool bViews, bool bLegacyTypes,
 {
 	if (IsEmpty())
 		return false;
-
+	TD_TIMER_STARTD();
 	// create PLY object
 	ASSERT(!fileName.empty());
 	Util::ensureFolder(fileName);
@@ -664,7 +664,7 @@ bool PointCloud::SavePLY(const String& fileName, bool bViews, bool bLegacyTypes,
 
 	// write the header
 	BasicPLY::Vertex::InitSaveProps(ply, (int)points.size(), !colors.empty(), !normals.empty(),
-		bViews && !pointViews.empty(), bViews && !pointWeights.empty(), bViews && !labels.empty(),fasle,false,!segments.empty());
+		bViews && !pointViews.empty(), bViews && !pointWeights.empty(), bViews && !labels.empty(),false,false,!segments.empty());
 	if (!ply.header_complete())
 		return false;
 

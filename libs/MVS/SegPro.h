@@ -5,11 +5,10 @@
 #include<Eigen/Dense>
 #include<vector>
 #include"../Common/Common.h"
-#include"../MVS/Common.h"
+#include"Common.h"
 #include <fstream>
 #include<sstream>
-// ��������
-#include <libs/MVS/Image.h>
+#include "Image.h"
 
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/array.hpp>

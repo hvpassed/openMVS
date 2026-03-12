@@ -36,7 +36,7 @@
 // I N C L U D E S /////////////////////////////////////////////////
 
 #include "Image.h"
-#include "../IO/SegPro.h"
+#include "../MVS/SegPro.h"
 #include<boost/archive/binary_oarchive.hpp>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/nvp.hpp>
