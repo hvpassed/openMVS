@@ -17,25 +17,39 @@ IF(POLICY CMP0104)
 	CMAKE_POLICY(SET CMP0104 NEW)
 ENDIF()
 IF(POLICY CMP0146)
-	CMAKE_POLICY(SET CMP0146 OLD) # not required, but forced by OpenCV old support for CUDA
+	# Use CMake's first-class CUDA language support instead of FindCUDA().
+	# note: not required, but forced by OpenCV old support for CUDA
+	CMAKE_POLICY(SET CMP0146 OLD)
 ENDIF()
 IF(POLICY CMP0144)
 	CMAKE_POLICY(SET CMP0144 NEW)
 ENDIF()
+IF(POLICY CMP0167)
+    # The FindBoost module is removed.
+    CMAKE_POLICY(SET CMP0167 NEW)
+ENDIF()
 # List configuration options
-SET(OpenMVS_BUILD_TOOLS ON CACHE BOOL "Build example applications")
-SET(OpenMVS_USE_OPENMP ON CACHE BOOL "Enable OpenMP library")
-SET(OpenMVS_USE_OPENGL ON CACHE BOOL "Enable OpenGL library")
-SET(OpenMVS_USE_BREAKPAD ON CACHE BOOL "Enable BreakPad library")
-SET(OpenMVS_USE_PYTHON ON CACHE BOOL "Enable Python library bindings")
-SET(OpenMVS_USE_CERES OFF CACHE BOOL "Enable CERES optimization library")
-SET(OpenMVS_USE_CUDA ON CACHE BOOL "Enable CUDA library")
-SET(OpenMVS_USE_FAST_FLOAT2INT OFF CACHE BOOL "Use an optimized code to convert real numbers to int")
-SET(OpenMVS_USE_FAST_INVSQRT OFF CACHE BOOL "Use an optimized code to compute the inverse square root (slower in fact on modern compilers)")
-SET(OpenMVS_USE_FAST_CBRT OFF CACHE BOOL "Use an optimized code to compute the cubic root")
-SET(OpenMVS_USE_SSE ON CACHE BOOL "Enable SSE optimizations")
-SET(OpenMVS_MAX_CUDA_COMPATIBILITY OFF CACHE BOOL "Build for maximum CUDA device compatibility")
-SET(OpenMVS_ENABLE_TESTS ON CACHE BOOL "Enable test code")
+OPTION(OpenMVS_BUILD_TOOLS "Build example applications" ON)
+OPTION(OpenMVS_BUILD_VIEWER "Build viewer application" ON)
+OPTION(OpenMVS_USE_OPENMP "Enable OpenMP library" ON)
+OPTION(OpenMVS_USE_BREAKPAD "Enable BreakPad library" ON)
+OPTION(OpenMVS_USE_PYTHON "Enable Python library bindings" ON)
+OPTION(OpenMVS_USE_CERES "Enable CERES optimization library" OFF)
+OPTION(OpenMVS_USE_CUDA "Enable CUDA library" ON)
+OPTION(OpenMVS_USE_FAST_FLOAT2INT "Use an optimized code to convert real numbers to int" OFF)
+OPTION(OpenMVS_USE_FAST_INVSQRT "Use an optimized code to compute the inverse square root (slower in fact on modern compilers)" OFF)
+OPTION(OpenMVS_USE_FAST_CBRT "Use an optimized code to compute the cubic root" OFF)
+OPTION(OpenMVS_USE_SSE "Enable SSE optimizations" ON)
+OPTION(OpenMVS_MAX_CUDA_COMPATIBILITY "Build for maximum CUDA device compatibility" OFF)
+OPTION(OpenMVS_ENABLE_IPO "Whether to enable interprocedural optimization" ON)
+OPTION(OpenMVS_ENABLE_TESTS "Enable test code" ON)
+OPTION(OpenMVS_USE_HDF5 "Enable HDF5 library support" ON)
+OPTION(OpenMVS_USE_FAISS "Enable FAISS library support" ON)
+# Disable CUDA on MacOS
+IF(APPLE)
+	SET(OpenMVS_USE_CUDA OFF)
+	MESSAGE(STATUS "Disabling CUDA on MacOS")
+ENDIF()
 
 # Load automatically VCPKG toolchain if available
 IF(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
@@ -44,30 +58,47 @@ IF(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
 		SET(VCPKG_TARGET_TRIPLET "$ENV{VCPKG_DEFAULT_TRIPLET}" CACHE STRING "")
 	ENDIF()
 ENDIF()
+IF(OpenMVS_BUILD_TOOLS AND OpenMVS_BUILD_VIEWER)
+    LIST(APPEND VCPKG_MANIFEST_FEATURES "viewer")
+ENDIF()
 IF(OpenMVS_USE_PYTHON)
 	LIST(APPEND VCPKG_MANIFEST_FEATURES "python")
 	SET(PARTIAL_BUILD_SHARED_LIBS ON)
 ENDIF()
-IF(OpenMVS_USE_CUDA)
-	LIST(APPEND VCPKG_MANIFEST_FEATURES "cuda")
-ENDIF()
 
-# Name of the project.
-#
-# CMake files in this project can refer to the root source directory
-# as ${OpenMVS_SOURCE_DIR} and to the root binary directory as
-# ${OpenMVS_BINARY_DIR}.
+# Name of the project:
+#   CMake files in this project can refer to the root source directory
+#   as ${OpenMVS_SOURCE_DIR} and to the root binary directory as
+#   ${OpenMVS_BINARY_DIR}.
 PROJECT(OpenMVS LANGUAGES CXX)
 
 SET(OpenMVS_MAJOR_VERSION 2)
-SET(OpenMVS_MINOR_VERSION 3)
+SET(OpenMVS_MINOR_VERSION 4)
 SET(OpenMVS_PATCH_VERSION 0)
 SET(OpenMVS_VERSION ${OpenMVS_MAJOR_VERSION}.${OpenMVS_MINOR_VERSION}.${OpenMVS_PATCH_VERSION})
 
 # Disable SSE on unsupported platforms
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|ARM|aarch64|AARCH64)")
 	SET(OpenMVS_USE_SSE OFF)
+	MESSAGE(STATUS "Disabling SSE on ARM platform")
 ENDIF()
+
+# Set default build type to Release if not already set and using single-configuration generator.
+IF(CMAKE_CONFIGURATION_TYPES)
+	MESSAGE(STATUS "Multi-configuration generator: ${CMAKE_GENERATOR}")
+ELSE()
+	IF(NOT CMAKE_BUILD_TYPE)
+		SET(CMAKE_BUILD_TYPE "Release" CACHE STRING
+			"Choose the type of build, options are: None(debug information only), Debug, Release, RelWithDebInfo, MinSizeRel."
+			FORCE) # FORCE to override user settings from command line if they are empty
+	ENDIF()
+	MESSAGE(STATUS "Build configuration: ${CMAKE_GENERATOR} - ${CMAKE_BUILD_TYPE}")
+ENDIF()
+
+# Build position-independent code, so that shared libraries can link against OpenMVS static libraries.
+SET(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# Set global property to avoid cyclic dependencies.
+SET_PROPERTY(GLOBAL PROPERTY GLOBAL_DEPENDS_NO_CYCLES ON)
 
 # Define helper functions and macros.
 INCLUDE(build/Utils.cmake)
@@ -82,116 +113,39 @@ ConfigLibrary()
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build/Modules)
 
 # Find required packages
-SET(OpenMVS_EXTRA_INCLUDES "")
+# Note: With modern CMake and target-based propagation, we only collect libraries in OpenMVS_EXTRA_LIBS
+# Include directories are now handled via target_include_directories in the Common library
 SET(OpenMVS_EXTRA_LIBS "")
 
-if(OpenMVS_USE_OPENMP)
-	SET(OpenMP_LIBS "")
-	FIND_PACKAGE(OpenMP)
-	if(OPENMP_FOUND)
-		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-		SET(_USE_OPENMP TRUE)
-		#cmake only check for separate OpenMP library on AppleClang 7+
-		#https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-		if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang" AND (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "7.0"))
-			SET(OpenMP_LIBS ${OpenMP_libomp_LIBRARY})
-			LIST(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_LIBS})
-		endif()
+if(OpenMVS_ENABLE_IPO)
+	INCLUDE(CheckIPOSupported)
+	check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+	if(IPO_SUPPORTED)
+		SET_PROPERTY(GLOBAL PROPERTY CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+		MESSAGE(STATUS "Interprocedural optimization enabled")
 	else()
-		MESSAGE("-- Can't find OpenMP. Continuing without it.")
+		MESSAGE(WARNING "Interprocedural optimization is not supported: ${IPO_ERROR}")
 	endif()
 endif()
 
-# find_package(hdf5 REQUIRED)
-# if(HDF5_FOUND)
-#     LIST(APPEND OpenMVS_EXTRA_INCLUDES ${HDF5_INCLUDE_DIRS})
-#     LIST(APPEND OpenMVS_EXTRA_LIBS "hdf5::hdf5-shared;hdf5::hdf5_hl-shared;hdf5::hdf5_cpp-shared;hdf5::hdf5_hl_cpp-shared")
-#     INCLUDE_DIRECTORIES(${HDF5_INCLUDE_DIRS})
-#     ADD_DEFINITIONS(${HDF5_DEFINITIONS})
-#     SET(_USE_HDF5 TRUE)
-#     MESSAGE(STATUS "HDF5 ${HDF5_VERSION} found (include: ${HDF5_INCLUDE_DIRS} lib: ${HDF5_LIBRARIES})")
-# else()
-#     MESSAGE(FATAL_ERROR "-- Can't find HDF5. Please specify HDF5 directory using HDF5_DIR variable")
-# endif()
-
-# ---------------- HDF5 (manual) ----------------
-set(HDF5_ROOT "$ENV{HOME}/.local" CACHE PATH "HDF5 install prefix")
-
-find_path(HDF5_INCLUDE_DIR
-    NAMES hdf5.h
-    PATHS "${HDF5_ROOT}/include"
-    NO_DEFAULT_PATH
-)
-
-find_library(HDF5_C_LIBRARY
-    NAMES hdf5
-    PATHS "${HDF5_ROOT}/lib"
-    NO_DEFAULT_PATH
-)
-
-find_library(HDF5_CPP_LIBRARY
-    NAMES hdf5_cpp
-    PATHS "${HDF5_ROOT}/lib"
-    NO_DEFAULT_PATH
-)
-
-find_library(HDF5_HL_LIBRARY
-    NAMES hdf5_hl
-    PATHS "${HDF5_ROOT}/lib"
-    NO_DEFAULT_PATH
-)
-
-find_library(HDF5_HL_CPP_LIBRARY
-    NAMES hdf5_hl_cpp
-    PATHS "${HDF5_ROOT}/lib"
-    NO_DEFAULT_PATH
-)
-
-if(NOT HDF5_INCLUDE_DIR)
-    message(FATAL_ERROR "HDF5 include dir not found: ${HDF5_ROOT}/include")
-endif()
-
-if(NOT HDF5_C_LIBRARY)
-    message(FATAL_ERROR "HDF5 C library not found: ${HDF5_ROOT}/lib/libhdf5*")
-endif()
-
-if(NOT HDF5_CPP_LIBRARY)
-    message(FATAL_ERROR "HDF5 C++ library not found: ${HDF5_ROOT}/lib/libhdf5_cpp*")
-endif()
-
-if(NOT HDF5_HL_LIBRARY)
-    message(FATAL_ERROR "HDF5 HL library not found: ${HDF5_ROOT}/lib/libhdf5_hl*")
-endif()
-
-if(NOT HDF5_HL_CPP_LIBRARY)
-    message(FATAL_ERROR "HDF5 HL C++ library not found: ${HDF5_ROOT}/lib/libhdf5_hl_cpp*")
-endif()
-
-list(APPEND OpenMVS_EXTRA_INCLUDES ${HDF5_INCLUDE_DIR})
-include_directories(${HDF5_INCLUDE_DIR})
-
-list(APPEND OpenMVS_EXTRA_LIBS
-    ${HDF5_C_LIBRARY}
-    ${HDF5_CPP_LIBRARY}
-    ${HDF5_HL_LIBRARY}
-    ${HDF5_HL_CPP_LIBRARY}
-)
-
-set(_USE_HDF5 TRUE)
-message(STATUS "Using manual HDF5")
-message(STATUS "HDF5 include: ${HDF5_INCLUDE_DIR}")
-message(STATUS "HDF5 libs: ${HDF5_C_LIBRARY};${HDF5_CPP_LIBRARY};${HDF5_HL_LIBRARY};${HDF5_HL_CPP_LIBRARY}")
-# ----------------------------------------------
-
-
-if(OpenMVS_USE_OPENGL)
-	FIND_PACKAGE(OpenGL)
-	if(OPENGL_FOUND)
-		INCLUDE_DIRECTORIES(${OPENGL_INCLUDE_DIR})
-		ADD_DEFINITIONS(${OpenGL_DEFINITIONS})
-		SET(_USE_OPENGL TRUE)
+if(OpenMVS_USE_OPENMP)
+	# MAC OS ARM64 OPENMP FIX: hint Homebrew paths
+	if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+		set(OpenMP_ROOT "/opt/homebrew/opt/libomp")
+	endif()
+	FIND_PACKAGE(OpenMP QUIET)
+	if(OPENMP_FOUND)
+		SET(_USE_OPENMP TRUE)
+		LIST(APPEND OpenMVS_EXTRA_LIBS OpenMP::OpenMP_CXX)
+		if(NOT APPLE)
+			# Apply OpenMP flags only to C/C++ compilation, not CUDA
+			# CUDA will get OpenMP support via linking with OpenMP::OpenMP_CXX
+			string(APPEND CMAKE_CXX_FLAGS " ${OpenMP_CXX_FLAGS}")
+			string(APPEND CMAKE_C_FLAGS " ${OpenMP_C_FLAGS}")
+		endif()
+		MESSAGE(STATUS "Found OpenMP " ${OpenMP_VERSION} " " ${OpenMP_CXX_INCLUDE_DIRS})
 	else()
-		MESSAGE("-- Can't find OpenGL. Continuing without it.")
+		MESSAGE(STATUS "Can't find OpenMP. Continuing without it.")
 	endif()
 endif()
 
@@ -199,78 +153,73 @@ if(OpenMVS_USE_CUDA)
 	INCLUDE(CheckLanguage)
 	CHECK_LANGUAGE(CUDA)
 	if(CMAKE_CUDA_COMPILER)
-		SET(CUDA_FOUND TRUE)
+		# Finding CUDA fails on some systems if paths to nvcc / cuda library are not set; ex. on linux:
+		# export PATH="/usr/local/cuda/bin:$PATH"
+		# export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 		if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 			SET(CMAKE_CUDA_ARCHITECTURES "native")
 		endif()
 		ENABLE_LANGUAGE(CUDA)
-		# not required, but forced by OpenCV old support for CUDA
-		FIND_PACKAGE(CUDA REQUIRED)
-		
-		find_package(CUDAToolkit REQUIRED)
-		# CUDA-11.x can not be compiled using C++14 standard on Windows
-		string(REGEX MATCH "^[0-9]+" CUDA_VERSION_MAJOR ${CMAKE_CUDA_COMPILER_VERSION})
-		string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR ${CMAKE_CUDA_COMPILER_VERSION})
-		if(${CUDA_VERSION_MAJOR} GREATER 10)
-			SET(CMAKE_CUDA_STANDARD 17)
-		endif()
-		EXECUTE_PROCESS(COMMAND "${CMAKE_CUDA_COMPILER}" --list-gpu-arch 
-				OUTPUT_VARIABLE LIST_GPU_ARCH 
+		SET(CUDA_FOUND TRUE)
+		SET(CMAKE_CUDA_STANDARD 17)
+		SET(CMAKE_CUDA_STANDARD_REQUIRED ON)
+		FIND_PACKAGE(CUDAToolkit REQUIRED)
+		if(OpenMVS_MAX_CUDA_COMPATIBILITY)
+			EXECUTE_PROCESS(COMMAND "${CMAKE_CUDA_COMPILER}" --list-gpu-arch
+				OUTPUT_VARIABLE LIST_GPU_ARCH
 				ERROR_QUIET)
-		if(NOT LIST_GPU_ARCH AND OpenMVS_MAX_CUDA_COMPATIBILITY)
-			message(WARNING "Cannot compile for max CUDA compatibility, nvcc does not support --list-gpu-arch")
-			SET(OpenMVS_MAX_CUDA_COMPATIBILITY OFF)
-		endif()
-		if(NOT OpenMVS_MAX_CUDA_COMPATIBILITY)
-			if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-				SET(CMAKE_CUDA_ARCHITECTURES 89)
+			if(NOT LIST_GPU_ARCH)
+				MESSAGE(WARNING "Cannot compile for max CUDA compatibility, nvcc does not support --list-gpu-arch")
+				SET(OpenMVS_MAX_CUDA_COMPATIBILITY OFF)
 			endif()
-		else()
+		endif()
+		if(OpenMVS_MAX_CUDA_COMPATIBILITY)
 			# Build for maximum compatibility
 			# https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/
-
+			UNSET(CMAKE_CUDA_ARCHITECTURES)
 			# Extract list of arch and gencodes
 			STRING(REPLACE "\r" "" LIST_GPU_ARCH ${LIST_GPU_ARCH})
 			STRING(REPLACE "\n" ";" LIST_GPU_ARCH ${LIST_GPU_ARCH})
-
-			EXECUTE_PROCESS(COMMAND "${CMAKE_CUDA_COMPILER}" --list-gpu-code 
-				OUTPUT_VARIABLE LIST_GPU_CODE 
+			EXECUTE_PROCESS(COMMAND "${CMAKE_CUDA_COMPILER}" --list-gpu-code
+				OUTPUT_VARIABLE LIST_GPU_CODE
 				ERROR_QUIET)
 			STRING(REPLACE "\r" "" LIST_GPU_CODE ${LIST_GPU_CODE})
 			STRING(REPLACE "\n" ";" LIST_GPU_CODE ${LIST_GPU_CODE})
-
 			LIST(GET LIST_GPU_CODE 0 TARGET_GPU_CODE)
 			SET(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=${TARGET_GPU_CODE}")
-
 			SET(IDX 0)
 			foreach(GPU_ARCH ${LIST_GPU_ARCH})
 				LIST(GET LIST_GPU_CODE ${IDX} GPU_CODE)
 				SET(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=${GPU_ARCH},code=${GPU_CODE}")
 				MATH(EXPR IDX "${IDX}+1")
 			endforeach()
-			MESSAGE("-- Set CUDA flags: " ${CMAKE_CUDA_FLAGS})
+			MESSAGE(STATUS "Set CUDA flags: " ${CMAKE_CUDA_FLAGS})
 		endif()
+		SET(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+		SET(CMAKE_CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 		SET(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
-		INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
+		# Add OpenMP support to CUDA host compiler
+		if(_USE_OPENMP)
+			SET(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler ${OpenMP_CXX_FLAGS}")
+		endif()
+		# Ensure CUDA toolkit include dirs are available for all targets
+		INCLUDE_DIRECTORIES(${CUDAToolkit_INCLUDE_DIRS})
+		LIST(APPEND OpenMVS_EXTRA_LIBS ${CUDAToolkit_LIBRARIES} CUDA::cuda_driver CUDA::cudart CUDA::curand)
 		SET(_USE_CUDA TRUE)
-		MESSAGE("-- Found CUDA: " ${CMAKE_CUDA_COMPILER_VERSION} " with GPU arch: " ${CMAKE_CUDA_ARCHITECTURES})
+		MESSAGE(STATUS "Found CUDA: " ${CMAKE_CUDA_COMPILER_VERSION} " with GPU arch: " ${CMAKE_CUDA_ARCHITECTURES})
 	else()
-		SET(CUDA_CUDA_LIBRARY "")
-		MESSAGE("-- Can't find CUDA. Continuing without it.")
+		MESSAGE(STATUS "Can't find CUDA. Continuing without it.")
 	endif()
-else()
-	SET(CUDA_CUDA_LIBRARY "")
 endif()
 
 if(OpenMVS_USE_BREAKPAD)
-	FIND_PACKAGE(BREAKPAD)
+	FIND_PACKAGE(BREAKPAD QUIET)
 	if(BREAKPAD_FOUND)
-		INCLUDE_DIRECTORIES(${BREAKPAD_INCLUDE_DIRS})
 		ADD_DEFINITIONS(${BREAKPAD_DEFINITIONS})
 		SET(_USE_BREAKPAD TRUE)
 		LIST(APPEND OpenMVS_EXTRA_LIBS ${BREAKPAD_LIBS})
 	else()
-		MESSAGE("-- Can't find BreakPad. Continuing without it.")
+		MESSAGE(STATUS "Can't find BreakPad. Continuing without it.")
 	endif()
 endif()
 
@@ -278,15 +227,14 @@ SET(Boost_EXTRA_COMPONENTS "")
 if(OpenMVS_USE_PYTHON)
 	FIND_PACKAGE(Python3 COMPONENTS Interpreter Development REQUIRED)
 	if(Python3_FOUND)
-		INCLUDE_DIRECTORIES(${Python3_INCLUDE_DIRS})
-		LIST(APPEND OpenMVS_EXTRA_INCLUDES ${Python3_INCLUDE_DIRS})
 		LIST(APPEND OpenMVS_EXTRA_LIBS ${Python3_LIBRARIES})
 		LIST(APPEND Boost_EXTRA_COMPONENTS python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR})
 		MESSAGE(STATUS "Python ${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR} found (include: ${Python3_INCLUDE_DIRS})")
 	else()
-		MESSAGE("-- Can't find Python. Continuing without it.")
+		MESSAGE(STATUS "Can't find Python. Continuing without it.")
 	endif()
 endif()
+
 
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 OLD)
@@ -298,84 +246,34 @@ FIND_PACKAGE(Boost REQUIRED
     COMPONENTS iostreams program_options serialization
     OPTIONAL_COMPONENTS system ${Boost_EXTRA_COMPONENTS}
 )
-
 if(Boost_FOUND)
-    LIST(APPEND OpenMVS_EXTRA_INCLUDES ${Boost_INCLUDE_DIRS})
-    INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
-    ADD_DEFINITIONS(${Boost_DEFINITIONS})
-    LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
-
-    # 优先使用 imported targets
-    if(TARGET Boost::iostreams)
-        LIST(APPEND OpenMVS_EXTRA_LIBS
-            Boost::iostreams
-            Boost::program_options
-            Boost::serialization
-        )
-
-        # Boost.System 在 1.86 里通常是 header-only；有 target 才链接
-        if(TARGET Boost::system)
-            LIST(APPEND OpenMVS_EXTRA_LIBS Boost::system)
-        endif()
-    else()
-        LIST(APPEND OpenMVS_EXTRA_LIBS ${Boost_LIBRARIES})
-    endif()
-
-    # Python 组件
-    if(OpenMVS_USE_PYTHON)
-        set(_BOOST_PYTHON_FOUND FALSE)
-
-        foreach(_py_tgt
-            Boost::python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}
-            Boost::python${Python3_VERSION_MAJOR}
-            Boost::python
-        )
-            if(TARGET ${_py_tgt})
-                LIST(APPEND OpenMVS_EXTRA_LIBS ${_py_tgt})
-                set(_BOOST_PYTHON_FOUND TRUE)
-                break()
-            endif()
-        endforeach()
-
-        if(_BOOST_PYTHON_FOUND)
-            SET(_USE_BOOST_PYTHON TRUE)
-        else()
-            MESSAGE(WARNING "Boost.Python target not found; Python bindings will be disabled")
-        endif()
-    endif()
-
-    # zstd 兜底
-    find_library(ZSTD_LIBRARY zstd
-        PATHS
-            $ENV{HOME}/.local/lib
-            /usr/lib64
-            /usr/lib/x86_64-linux-gnu
-    )
-    if(ZSTD_LIBRARY)
-        LIST(APPEND OpenMVS_EXTRA_LIBS ${ZSTD_LIBRARY})
-    endif()
-
-    SET(_USE_BOOST TRUE)
+	ADD_DEFINITIONS(${Boost_DEFINITIONS})
+	LIST(APPEND OpenMVS_EXTRA_LIBS ${Boost_LIBRARIES})
+	LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
+	SET(_USE_BOOST TRUE)
+	if(OpenMVS_USE_PYTHON AND Boost_${Boost_EXTRA_COMPONENTS}_FOUND)
+		SET(_USE_BOOST_PYTHON TRUE)
+	endif()
 endif()
 
-FIND_PACKAGE(Eigen3 3.4 REQUIRED)
-if(EIGEN3_FOUND)
-	LIST(APPEND OpenMVS_EXTRA_INCLUDES ${EIGEN3_INCLUDE_DIR})
-	INCLUDE_DIRECTORIES(${EIGEN3_INCLUDE_DIR})
-	ADD_DEFINITIONS(${EIGEN3_DEFINITIONS})
+FIND_PACKAGE(Eigen3 CONFIG REQUIRED)
+if(Eigen3_FOUND)
+	if(Eigen3_VERSION VERSION_LESS "3.4")
+		MESSAGE(FATAL_ERROR "Eigen ${Eigen3_VERSION} found, but at least 3.4 is required")
+	endif()
+	LIST(APPEND OpenMVS_EXTRA_LIBS Eigen3::Eigen)
 	SET(_USE_EIGEN TRUE)
-	MESSAGE(STATUS "Eigen ${EIGEN3_VERSION} found (include: ${EIGEN3_INCLUDE_DIR})")
+	MESSAGE(STATUS "Eigen ${Eigen3_VERSION} found")
 endif()
 
 FIND_PACKAGE(OpenCV REQUIRED)
 if(OpenCV_FOUND)
-	LIST(APPEND OpenMVS_EXTRA_INCLUDES ${OpenCV_INCLUDE_DIRS})
-	INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 	ADD_DEFINITIONS(${OpenCV_DEFINITIONS})
+	LIST(APPEND OpenMVS_EXTRA_LIBS ${OpenCV_LIBS})
 	SET(_USE_OPENCV TRUE)
-	MESSAGE(STATUS "OpenCV ${OpenCV_VERSION} found (include: ${OpenCV_INCLUDE_DIRS})")
+	MESSAGE(STATUS "OpenCV ${OpenCV_VERSION} found")
 else()
-	MESSAGE("-- Can't find OpenCV. Please specify OpenCV directory using OpenCV_DIR variable")
+	MESSAGE(STATUS "Can't find OpenCV. Please specify OpenCV directory using OpenCV_DIR variable")
 endif()
 
 set(MKL_COMPONENTS
@@ -438,7 +336,92 @@ else()
     message(FATAL_ERROR "FAISS target not found")
 endif()
 
-LIST(REMOVE_DUPLICATES OpenMVS_EXTRA_INCLUDES)
+if(OpenMVS_USE_HDF5)
+	# 如果你只用 C API，可改成: COMPONENTS C HL
+	find_package(HDF5 COMPONENTS C CXX HL QUIET)
+
+	if(HDF5_FOUND)
+		# 兼容 CMake >= 3.19 的 imported targets
+		if(TARGET HDF5::HDF5)
+			list(APPEND OpenMVS_EXTRA_LIBS HDF5::HDF5)
+		elseif(TARGET hdf5::hdf5_hl_cpp)
+			list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_hl_cpp)
+		elseif(TARGET hdf5::hdf5_cpp)
+			list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_cpp)
+			if(TARGET hdf5::hdf5_hl)
+				list(APPEND OpenMVS_EXTRA_LIBS hdf5::hdf5_hl)
+			endif()
+		else()
+			# 兼容旧模式
+			include_directories(${HDF5_INCLUDE_DIRS})
+			add_definitions(${HDF5_DEFINITIONS})
+			list(APPEND OpenMVS_EXTRA_LIBS ${HDF5_LIBRARIES})
+		endif()
+
+		set(_USE_HDF5 TRUE)
+		message(STATUS "HDF5 ${HDF5_VERSION} found")
+	else()
+		message(STATUS "Can't find HDF5. Continuing without it.")
+	endif()
+endif()
+
+if(OpenMVS_USE_FAISS)
+	unset(FAISS_FOUND)
+	unset(FAISS_INCLUDE_DIR CACHE)
+	unset(FAISS_LIBRARY CACHE)
+
+	# 先尝试 config package（名字大小写两种都试一下）
+	find_package(faiss CONFIG QUIET)
+	find_package(Faiss CONFIG QUIET)
+
+	if(TARGET faiss)
+		list(APPEND OpenMVS_EXTRA_LIBS faiss)
+		set(FAISS_FOUND TRUE)
+
+		# 如果安装的是 GPU 版，通常会安装这个头
+		if(EXISTS "${CMAKE_INSTALL_PREFIX}/include/faiss/gpu/StandardGpuResources.h")
+			set(_USE_FAISS_GPU TRUE)
+		endif()
+
+	elseif(TARGET Faiss::faiss)
+		list(APPEND OpenMVS_EXTRA_LIBS Faiss::faiss)
+		set(FAISS_FOUND TRUE)
+
+	else()
+		# 手动 fallback：兼容只有头文件+库文件、没有 CMake config 的安装
+		find_path(FAISS_INCLUDE_DIR
+			NAMES faiss/Index.h
+			PATH_SUFFIXES include
+		)
+
+		find_library(FAISS_LIBRARY
+			NAMES faiss
+			PATH_SUFFIXES lib lib64
+		)
+
+		if(FAISS_INCLUDE_DIR AND FAISS_LIBRARY)
+			add_library(faiss_external UNKNOWN IMPORTED)
+			set_target_properties(faiss_external PROPERTIES
+				IMPORTED_LOCATION "${FAISS_LIBRARY}"
+				INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+			)
+			list(APPEND OpenMVS_EXTRA_LIBS faiss_external)
+			set(FAISS_FOUND TRUE)
+
+			if(EXISTS "${FAISS_INCLUDE_DIR}/faiss/gpu/StandardGpuResources.h")
+				set(_USE_FAISS_GPU TRUE)
+			endif()
+		endif()
+	endif()
+
+	if(FAISS_FOUND)
+		set(_USE_FAISS TRUE)
+		message(STATUS "FAISS found")
+	else()
+		message(STATUS "Can't find FAISS. Continuing without it.")
+	endif()
+endif()
+
 LIST(REMOVE_DUPLICATES OpenMVS_EXTRA_LIBS)
 
 # Set defines
@@ -457,9 +440,6 @@ endif()
 if(OpenMVS_USE_CERES)
 	SET(_USE_CERES TRUE)
 endif()
-
-INCLUDE_DIRECTORIES("${OpenMVS_SOURCE_DIR}")
-INCLUDE_DIRECTORIES("${CMAKE_BINARY_DIR}")
 
 # Add modules
 ADD_SUBDIRECTORY(libs)
@@ -494,7 +474,7 @@ INCLUDE(CMakePackageConfigHelpers)
 write_basic_package_version_file("${PROJECT_BINARY_DIR}/OpenMVSConfigVersion.cmake"
 	VERSION ${OpenMVS_VERSION}
 	COMPATIBILITY AnyNewerVersion)
-SET(INSTALL_INCLUDE_DIR_IN ${INSTALL_INCLUDE_DIR_PREFIX} ${OpenMVS_EXTRA_INCLUDES})
+# Note: Include paths are handled via imported targets and target_include_directories
 SET(INSTALL_CMAKE_DIR_IN ${INSTALL_CMAKE_DIR_PREFIX})
 configure_package_config_file("${CMAKE_CURRENT_SOURCE_DIR}/build/Templates/OpenMVSConfig.cmake.in"
 	"${PROJECT_BINARY_DIR}/OpenMVSConfig.cmake"

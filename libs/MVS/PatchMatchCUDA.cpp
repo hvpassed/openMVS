@@ -39,8 +39,14 @@
 
 // D E F I N E S ///////////////////////////////////////////////////
 
+#pragma push_macro("VERBOSE")
+#undef VERBOSE
+#define VERBOSE(...) LOG(lt, __VA_ARGS__)
+
 
 // S T R U C T S ///////////////////////////////////////////////////
+
+DEFINE_LOG_NAME(lt, _T("PtchMtch"));
 
 namespace MVS {
 
@@ -189,7 +195,7 @@ void PatchMatch::EstimateDepthMap(DepthData& depthData)
 	IIndex prevNumImages = (IIndex)images.size();
 	const IIndex numImages = depthData.images.size();
 	params.nNumViews = (int)numImages-1;
-	params.nInitTopK = std::min(params.nInitTopK, params.nNumViews);
+	params.nInitTopK = MINF(params.nInitTopK, params.nNumViews);
 	params.fDepthMin = depthData.dMin;
 	params.fDepthMax = depthData.dMax;
 	if (prevNumImages < numImages) {
@@ -406,7 +412,7 @@ void PatchMatch::EstimateDepthMap(DepthData& depthData)
 	if (OPTDENSE::nIgnoreMaskLabel >= 0) {
 		const DepthData::ViewData& view = depthData.GetView();
 		BitMatrix mask;
-		if (DepthEstimator::ImportIgnoreMask(*view.pImageData, depthData.depthMap.size(), (uint16_t)OPTDENSE::nIgnoreMaskLabel, mask))
+		if (DepthEstimator::ImportIgnoreMask(*view.pImageData, depthData.depthMap.size(), (uint8_t)OPTDENSE::nIgnoreMaskLabel, mask))
 			depthData.ApplyIgnoreMask(mask);
 	}
 
@@ -421,5 +427,7 @@ void PatchMatch::EstimateDepthMap(DepthData& depthData)
 } // namespace CUDA
 
 } // namespace MVS
+
+#pragma pop_macro("VERBOSE")
 
 #endif // _USE_CUDA

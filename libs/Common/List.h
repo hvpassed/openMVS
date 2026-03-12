@@ -69,6 +69,7 @@
 #define CLISTREFVECTOR(CLIST, var, vec) uint8_t _ArrData##var[sizeof(CLIST)]; new(_ArrData##var) CLIST(vec.size(), const_cast<CLIST::Type*>(&vec[0])); const CLIST& var(*reinterpret_cast<const CLIST*>(_ArrData##var))
 #endif
 
+#define CLISTDEFSCALAR(TYPE) SEACAVE::cList< TYPE, TYPE, 0 >
 #define CLISTDEF0(TYPE) SEACAVE::cList< TYPE, const TYPE&, 0 >
 #define CLISTDEF2(TYPE) SEACAVE::cList< TYPE, const TYPE&, 2 >
 #define CLISTDEF0IDX(TYPE,IDXTYPE) SEACAVE::cList< TYPE, const TYPE&, 0, 16, IDXTYPE >
@@ -122,30 +123,45 @@ public:
 	}
 
 	// construct a list containing size initialized elements
-	cList(IDX size) : _size(size), _vectorSize(size), _vector((TYPE*)operator new[] (static_cast<size_t>(size) * sizeof(TYPE)))
+	inline cList(IDX size) :
+		_size(size), _vectorSize(size), _vector((TYPE*)operator new[] (static_cast<size_t>(size) * sizeof(TYPE)))
 	{
 		ASSERT(size > 0 && size < NO_INDEX);
 		_ArrayConstruct(_vector, size);
 	}
 
 	// construct a list containing size initialized elements and allocated space for _reserved elements
-	cList(IDX size, IDX _reserved) : _size(size), _vectorSize(_reserved), _vector((TYPE*)operator new[] (static_cast<size_t>(_reserved) * sizeof(TYPE)))
+	explicit cList(IDX size, IDX _reserved) :
+		_size(size), _vectorSize(_reserved), _vector((TYPE*)operator new[] (static_cast<size_t>(_reserved) * sizeof(TYPE)))
 	{
 		ASSERT(_reserved >= size && _reserved < NO_INDEX);
 		_ArrayConstruct(_vector, size);
 	}
 
+	// construct a list containing size initialized elements, set elements to given value, and allocated space for _reserved elements
+	explicit cList(IDX size, const Type& val, IDX _reserved) :
+	    _size(size), _vectorSize(_reserved), _vector((TYPE*)operator new[](static_cast<size_t>(_reserved) * sizeof(TYPE)))
+	{
+		ASSERT(_reserved >= size && _reserved < NO_INDEX);
+		_ArrayConstruct(_vector, size, val);
+	}
+
 	// construct a list from the contents of the range [first, last)
 	template <class InputIt>
-	cList(InputIt first, InputIt last, bool /*dummy*/) : _size(std::distance(first, last)), _vectorSize(_size), _vector((TYPE*)operator new[](static_cast<size_t>(_size) * sizeof(TYPE)))
+	explicit cList(InputIt first, InputIt last, bool /*dummy*/) :
+		_size(0), _vectorSize(std::distance(first, last)), _vector(NULL)
 	{
+		if (_vectorSize == 0)
+			return;
+		_vector = (TYPE*)(operator new[] (static_cast<size_t>(_vectorSize) * sizeof(TYPE)));
 		while (first != last)
 			Insert(*first++);
 	}
 
 
 	// copy constructor: creates a deep-copy of the given list
-	cList(const cList& rList) : _size(rList._size), _vectorSize(rList._vectorSize), _vector(NULL)
+	cList(const cList& rList) :
+		_size(rList._size), _vectorSize(rList._vectorSize), _vector(NULL)
 	{
 		if (_vectorSize == 0) {
 			ASSERT(_size == 0);
@@ -155,13 +171,14 @@ public:
 		_ArrayCopyConstruct(_vector, rList._vector, _size);
 	}
 	// move constructor: creates a move-copy of the given list
-	cList(cList&& rList) : _size(rList._size), _vectorSize(rList._vectorSize), _vector(rList._vector)
+	cList(cList&& rList) :
+	    _size(rList._size), _vectorSize(rList._vectorSize), _vector(rList._vector)
 	{
 		rList._Init();
 	}
 
 	// constructor a list from a raw data array
-	explicit inline cList(TYPE* pDataBegin, TYPE* pDataEnd) : _size((IDX)(pDataEnd-pDataBegin)), _vectorSize(_size)
+	explicit cList(TYPE* pDataBegin, TYPE* pDataEnd) : _size((IDX)(pDataEnd-pDataBegin)), _vectorSize(_size)
 	{
 		if (_vectorSize == 0)
 			return;
@@ -170,7 +187,7 @@ public:
 	}
 
 	// constructor a list from a raw data array, taking ownership of the array memory
-	explicit inline cList(IDX nSize, TYPE* pData) : _size(nSize), _vectorSize(nSize), _vector(pData)
+	explicit cList(IDX nSize, TYPE* pData) : _size(nSize), _vectorSize(nSize), _vector(pData)
 	{
 	}
 
@@ -312,7 +329,7 @@ public:
 		_vector[idx1] = _vector[idx2];
 		_vector[idx2] = tmp;
 	}
-	
+
 	inline bool		operator==(const cList& rList) const {
 		if (_size != rList._size)
 			return false;
@@ -689,7 +706,7 @@ public:
 		return (static_cast<RTYPE>(*nth1) + static_cast<RTYPE>(*nth)) / RTYPE(2);
 	}
 
-	inline TYPE		GetMean()
+	inline TYPE		GetMean() const
 	{
 		return std::accumulate(Begin(), End(), TYPE(0)) / _size;
 	}
@@ -1326,6 +1343,16 @@ protected:
 				new(dst+n) TYPE;
 		}
 	}
+	static inline void	_ArrayConstruct(TYPE* RESTRICT dst, IDX n, const Type& value)
+	{
+		if (useConstruct) {
+			while (n--)
+				new(dst+n) TYPE(value);
+		} else {
+			while (n--)
+				dst[n] = value;
+		}
+	}
 	static inline void	_ArrayCopyConstruct(TYPE* RESTRICT dst, const TYPE* RESTRICT src, IDX n)
 	{
 		if (useConstruct) {
@@ -1347,7 +1374,7 @@ protected:
 	{
 		if (useConstruct) {
 			while (n--)
-				dst[n] = src[n];
+				dst[n] = std::move(src[n]);
 		} else {
 			memcpy((void*)dst, (const void*)src, n*sizeof(TYPE));
 		}
@@ -1357,7 +1384,7 @@ protected:
 		ASSERT(dst != src);
 		if (useConstruct > 1) {
 			for (IDX i=0; i<n; ++i) {
-				new(dst+i) TYPE(src[i]);
+				new(dst+i) TYPE(std::move(src[i]));
 				(src+i)->~TYPE();
 			}
 		} else {
@@ -1370,7 +1397,7 @@ protected:
 		ASSERT(dst != src);
 		if (useConstruct > 1) {
 			while (n--) {
-				new(dst+n) TYPE(src[n]);
+				new(dst+n) TYPE(std::move(src[n]));
 				(src+n)->~TYPE();
 			}
 		} else {
@@ -1387,7 +1414,7 @@ protected:
 		ASSERT(dst != src);
 		if (useConstruct > 1) {
 			while (n--) {
-				dst[n] = src[n];
+				dst[n] = std::move(src[n]);
 				(src+n)->~TYPE();
 			}
 		} else {
@@ -1433,6 +1460,7 @@ public:
 	inline reference emplace_back(Args&&... args) { return AddConstruct(std::forward<Args>(args)...); }
 	inline void push_back(value_type&& elem) { AddConstruct(elem); }
 	#endif
+	inline void assign(size_type count, const Type& value) { Empty(); Reserve(count); _ArrayConstruct(_vector, count, value); _size = count; }
 	inline void push_back(const_reference elem) { Insert(elem); }
 	inline void pop_back() { RemoveLast(); }
 	inline void reserve(size_type newSize) { Reserve(newSize); }

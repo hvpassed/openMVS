@@ -43,8 +43,14 @@ using namespace STEREO;
 // uncomment to enable OpenCV filter demo
 //#define _USE_FILTER_DEMO
 
+#pragma push_macro("VERBOSE")
+#undef VERBOSE
+#define VERBOSE(...) LOG(lt, __VA_ARGS__)
+
 
 // S T R U C T S ///////////////////////////////////////////////////
+
+DEFINE_LOG_NAME(lt, _T("SemGblMt"));
 
 #ifdef _USE_FILTER_DEMO
 #include "opencv2/ximgproc/disparity_filter.hpp"
@@ -306,17 +312,17 @@ int disparityFiltering(cv::Mat left, cv::Mat right, int argc, const LPCSTR* argv
 	{
 		cv::Mat filtered_disp_vis;
 		cv::ximgproc::getDisparityVis(filtered_disp,filtered_disp_vis,vis_mult);
-		cv::imwrite(dst_path,filtered_disp_vis);
+		SaveImage(filtered_disp_vis, dst_path);
 	}
 	if(dst_raw_path!="None")
 	{
 		cv::Mat raw_disp_vis;
 		cv::ximgproc::getDisparityVis(left_disp,raw_disp_vis,vis_mult);
-		cv::imwrite(dst_raw_path,raw_disp_vis);
+		SaveImage(raw_disp_vis, dst_raw_path);
 	}
 	if(dst_conf_path!="None")
 	{
-		cv::imwrite(dst_conf_path,conf_map);
+		SaveImage(conf_map, dst_conf_path);
 	}
 
 	if(!no_display)
@@ -615,7 +621,8 @@ void SemiGlobalMatcher::Match(const Scene& scene, IIndex idxImage, IIndex numNei
 				image.camera = leftImageLevel.camera;
 				DepthMap depthMap;
 				Depth dMin, dMax;
-				TriangulatePoints2DepthMap(image, scene.pointcloud, points, depthMap, dMin, dMax, true);
+				TriangulatePoints2DepthMap(image.camera, image.image.size(), scene.pointcloud, points, depthMap,
+					dMin, dMax, image.pImageData->avgDepth);
 				points.Release();
 				Matrix3x3 H2(H); Matrix4x4 Q2(Q);
 				Image::ScaleStereoRectification(H2, Q2, scale*0.5);
@@ -2224,7 +2231,7 @@ bool SemiGlobalMatcher::ExportDisparityMap(const String& fileName, const Dispari
 } // ExportDisparityMap
 
 
-// export point cloud
+// export point-cloud
 bool SemiGlobalMatcher::ExportPointCloud(const String& fileName, const Image& imageData, const DisparityMap& disparityMap, const Matrix4x4& Q, Disparity subpixelSteps)
 {
 	ASSERT(!disparityMap.empty());
@@ -2363,3 +2370,5 @@ bool MVS::STEREO::ExportCamerasEngin(const Scene& scene, const String& fileName)
 	return true;
 } // ExportCamerasEngin
 /*----------------------------------------------------------------*/
+
+#pragma pop_macro("VERBOSE")

@@ -33,6 +33,11 @@
 #include "Scene.h"
 #include "../Math/SimilarityTransform.h"
 
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Search_traits_3.h>
+#include <CGAL/Orthogonal_k_neighbor_search.h>
+#include <CGAL/Kd_tree.h>
+
 using namespace MVS;
 
 
@@ -46,8 +51,14 @@ using namespace MVS;
 #define SCENE_USE_OPENMP
 #endif
 
+#pragma push_macro("VERBOSE")
+#undef VERBOSE
+#define VERBOSE(...) LOG(lt, __VA_ARGS__)
+
 
 // S T R U C T S ///////////////////////////////////////////////////
+
+DEFINE_LOG_NAME(lt, _T("Scene   "));
 
 void Scene::Release()
 {
@@ -55,6 +66,8 @@ void Scene::Release()
 	images.Release();
 	pointcloud.Release();
 	mesh.Release();
+	obb.Reset();
+	transform = Matrix4x4f::IDENTITY;
 }
 
 bool Scene::IsValid() const
@@ -76,7 +89,7 @@ bool Scene::ImagesHaveNeighbors() const
 }
 
 
-bool Scene::LoadInterface(const String & fileName)
+bool Scene::LoadInterface(const String& fileName)
 {
 	TD_TIMER_STARTD();
 	Interface obj;
@@ -207,16 +220,19 @@ bool Scene::LoadInterface(const String & fileName)
 	// import region of interest
 	obb.Set(Matrix3x3f(obj.obb.rot), Point3f(obj.obb.ptMin), Point3f(obj.obb.ptMax));
 
-	DEBUG_EXTRA("Scene loaded from interface format (%s):\n"
+	// import transform
+	transform = obj.transform;
+
+	DEBUG_EXTRA("Scene loaded in interface format from '%s' (%s):\n"
 				"\t%u images (%u calibrated) with a total of %.2f MPixels (%.2f MPixels/image)\n"
 				"\t%u points, %u vertices, %u faces",
-				TD_TIMER_GET_FMT().c_str(),
+				Util::getFileNameExt(fileName).c_str(), TD_TIMER_GET_FMT().c_str(),
 				images.size(), nCalibratedImages, (double)nTotalPixels/(1024.0*1024.0), (double)nTotalPixels/(1024.0*1024.0*nCalibratedImages),
 				pointcloud.points.size(), mesh.vertices.size(), mesh.faces.size());
 	return true;
 } // LoadInterface
 
-bool Scene::SaveInterface(const String & fileName, int version) const
+bool Scene::SaveInterface(const String& fileName, int version) const
 {
 	TD_TIMER_STARTD();
 	Interface obj;
@@ -301,14 +317,17 @@ bool Scene::SaveInterface(const String & fileName, int version) const
 	obj.obb.ptMin = Point3f((obb.m_pos-obb.m_ext).eval());
 	obj.obb.ptMax = Point3f((obb.m_pos+obb.m_ext).eval());
 
+	// export transform
+	obj.transform = transform;
+
 	// serialize out the current state
 	if (!ARCHIVE::SerializeSave(obj, fileName, version>=0?uint32_t(version):MVSI_PROJECT_VER))
 		return false;
 
-	DEBUG_EXTRA("Scene saved to interface format (%s):\n"
+	DEBUG_EXTRA("Scene saved in interface format to '%s' (%s):\n"
 				"\t%u images (%u calibrated)\n"
 				"\t%u points, %u vertices, %u faces",
-				TD_TIMER_GET_FMT().c_str(),
+				Util::getFileNameExt(fileName).c_str(), TD_TIMER_GET_FMT().c_str(),
 				images.size(), nCalibratedImages,
 				pointcloud.points.size(), mesh.vertices.size(), mesh.faces.size());
 	return true;
@@ -429,10 +448,10 @@ bool Scene::LoadDMAP(const String& fileName)
 	#endif
 
 	DEBUG_EXTRA("Scene loaded from depth-map format - %dx%d size, %.2f%%%% coverage (%s):\n"
-		"\t1 images (1 calibrated) with a total of %.2f MPixels (%.2f MPixels/image)\n"
+		"\t1 images (%u neighbors, %.2f FOV) with a total of %.2f MPixels (%.2f MPixels/image)\n"
 		"\t%u points, 0 lines",
 		depthMap.width(), depthMap.height(), 100.0*pointcloud.GetSize()/depthMap.area(), TD_TIMER_GET_FMT().c_str(),
-		(double)image.image.area()/(1024.0*1024.0), (double)image.image.area()/(1024.0*1024.0*nCalibratedImages),
+		IDs.size()-1, R2D(image.ComputeFOV()), (double)image.image.area()/(1024.0*1024.0), (double)image.image.area()/(1024.0*1024.0*nCalibratedImages),
 		pointcloud.GetSize());
 	return true;
 } // LoadDMAP
@@ -442,7 +461,7 @@ bool Scene::LoadDMAP(const String& fileName)
 // each line store the view ID followed by the 3+ closest view IDs, ordered in decreasing overlap:
 //
 // <cam-id> <neighbor-cam-id-0> <neighbor-cam-id-1> <neighbor-cam-id-2> <...>
-// 
+//
 // for example:
 // 0 1 2 3 4
 // 1 0 2 3 4
@@ -516,36 +535,15 @@ bool Scene::Import(const String& fileName)
 		Release();
 		return LoadDMAP(fileName);
 	}
-	if (ext == _T(".obj") || ext == _T(".gltf") || ext == _T(".glb")) {
-		// import mesh from obj/gltf file
-		Release();
+	if (ext == _T(".obj")) {
+		// import mesh from obj file
 		return mesh.Load(fileName);
 	}
-	if (ext == _T(".ply")) {
-		// import point-cloud/mesh from ply file
-		Release();
-		int nVertices(0), nFaces(0);
-		{
-		PLY ply;
-		if (!ply.read(fileName)) {
-			DEBUG_EXTRA("error: invalid PLY file");
-			return false;
-		}
-		for (int i = 0; i < ply.get_elements_count(); ++i) {
-			int elem_count;
-			LPCSTR elem_name = ply.setup_element_read(i, &elem_count);
-			if (PLY::equal_strings("vertex", elem_name)) {
-				nVertices = elem_count;
-			} else
-			if (PLY::equal_strings("face", elem_name)) {
-				nFaces = elem_count;
-			}
-		}
-		}
-		if (nVertices && nFaces)
-			return mesh.Load(fileName);
-		if (nVertices)
-			return pointcloud.Load(fileName);
+	if (ext == _T(".ply") || ext == _T(".gltf") || ext == _T(".glb")) {
+		// import point-cloud/mesh from ply/gltf file
+		if (mesh.Load(fileName))
+			return true;
+		return pointcloud.Load(fileName);
 	}
 	return false;
 } // Import
@@ -559,8 +557,10 @@ Scene::SCENE_TYPE Scene::Load(const String& fileName, bool bImport)
 	#ifdef _USE_BOOST
 	// open the input stream
 	std::ifstream fs(fileName, std::ios::in | std::ios::binary);
-	if (!fs.is_open())
+	if (!fs.is_open()) {
+		VERBOSE("error: unable to open file '%s'", fileName.c_str());
 		return SCENE_NA;
+	}
 	// load project header ID
 	char szHeader[4];
 	fs.read(szHeader, 4);
@@ -587,8 +587,10 @@ Scene::SCENE_TYPE Scene::Load(const String& fileName, bool bImport)
 	uint64_t nReserved;
 	fs.read((char*)&nReserved, sizeof(uint64_t));
 	// serialize in the current state
-	if (!SerializeLoad(*this, fs, (ARCHIVE_TYPE)nType))
+	if (!SerializeLoad(*this, fs, (ARCHIVE_TYPE)nType)) {
+		VERBOSE("error: unable to load project data");
 		return SCENE_NA;
+	}
 	// init images
 	nCalibratedImages = 0;
 	size_t nTotalPixels(0);
@@ -659,13 +661,26 @@ bool Scene::Save(const String& fileName, ARCHIVE_TYPE type) const
 
 
 // compute point-cloud with visibility info from the existing mesh
-void Scene::SampleMeshWithVisibility(unsigned maxResolution)
+//  - sampling: sampling density per squared unit area (if >0), or
+//              absolute number of points (if <0), or
+//              use existing vertices as samples (if ==0)
+void Scene::SampleMeshWithVisibility(REAL sampling, unsigned maxResolution)
 {
 	ASSERT(!mesh.IsEmpty());
-	const Depth thFrontDepth(0.985f);
 	pointcloud.Release();
-	pointcloud.points.resize(mesh.vertices.size());
-	pointcloud.pointViews.resize(mesh.vertices.size());
+	if (sampling < 0) {
+		// absolute number of points
+		mesh.SamplePoints(ROUND2INT<unsigned>(-sampling), pointcloud);
+	} else if (sampling > 0) {
+		// sampling density per squared unit area
+		mesh.SamplePoints(sampling, pointcloud);
+	} else {
+		// use existing vertices as samples
+		pointcloud.points.Join(mesh.vertices.data(), mesh.vertices.size());
+	}
+	pointcloud.pointViews.resize(pointcloud.points.size());
+	// compute visibility for each point by projecting the mesh onto each image
+	constexpr Depth thFrontDepth(0.985f);
 	#ifdef SCENE_USE_OPENMP
 	#pragma omp parallel for
 	for (int64_t _ID=0; _ID<images.size(); ++_ID) {
@@ -681,8 +696,8 @@ void Scene::SampleMeshWithVisibility(unsigned maxResolution)
 		const Camera camera(imageData.GetCamera(platforms, scaledSize));
 		DepthMap depthMap(scaledSize);
 		mesh.Project(camera, depthMap);
-		FOREACH(idxVertex, mesh.vertices) {
-			const Point3f xz(camera.TransformPointW2I3(Cast<REAL>(mesh.vertices[idxVertex])));
+		FOREACH(idxPoint, pointcloud.points) {
+			const Point3f xz(camera.TransformPointW2I3(Cast<REAL>(pointcloud.points[idxPoint])));
 			if (xz.z <= 0)
 				continue;
 			const Point2f x(xz.x, xz.y);
@@ -690,18 +705,23 @@ void Scene::SampleMeshWithVisibility(unsigned maxResolution)
 				#ifdef SCENE_USE_OPENMP
 				#pragma omp critical
 				#endif
-				pointcloud.pointViews[idxVertex].emplace_back(ID);
+				pointcloud.pointViews[idxPoint].emplace_back(ID);
 			}
 		}
 	}
+	// remove points with less than 2 views
 	RFOREACH(idx, pointcloud.points) {
-		if (pointcloud.pointViews[idx].size() < 2) {
+		if (pointcloud.pointViews[idx].size() < 2)
 			pointcloud.RemovePoint(idx);
-			continue;
-		}
-		pointcloud.points[idx] = mesh.vertices[(Mesh::VIndex)idx];
-		pointcloud.pointViews[idx].Sort();
+		#ifdef SCENE_USE_OPENMP
+		else
+			pointcloud.pointViews[idx].Sort();
+		#endif
 	}
+	DEBUG_EXTRA("Sampled mesh with visibility info: %u points from %f %s",
+		pointcloud.points.size(),
+		sampling < 0 ? -sampling : sampling > 0 ? sampling : REAL(mesh.vertices.size()),
+		sampling < 0 ? "samples" : sampling > 0 ? "sampling" : "vertices");
 } // SampleMeshWithVisibility
 /*----------------------------------------------------------------*/
 
@@ -765,6 +785,404 @@ bool Scene::ExportMeshToDepthMaps(const String& baseName)
 /*----------------------------------------------------------------*/
 
 
+// estimate normals for the point-cloud using the views per point
+bool Scene::EstimatePointCloudNormals(bool bRefine)
+{
+	if (!pointcloud.IsValid() || images.empty())
+		return false; // no views available
+	if (pointcloud.normals.size() == pointcloud.points.size())
+		return true; // normals already estimated
+	pointcloud.normals.resize(pointcloud.points.size());
+	// estimate normals using the views per point
+	#ifdef SCENE_USE_OPENMP
+	#pragma omp parallel for
+	for (int64_t _ID=0; _ID<(int64_t)pointcloud.points.size(); ++_ID) {
+		const IIndex ID(static_cast<IIndex>(_ID));
+	#else
+	FOREACH(ID, pointcloud.points) {
+	#endif
+		const PointCloud::Point& point = pointcloud.points[ID];
+		const PointCloud::ViewArr& views = pointcloud.pointViews[ID];
+		ASSERT(views.size() >= 2);
+		// compute the normal as the average over the viewing directions
+		Point3 viewDirSum(Point3::ZERO);
+		FOREACH(viewIdx, views) {
+			const Image& imageData = images[views[viewIdx]];
+			ASSERT(imageData.IsValid());
+			const Point3 viewDir = normalized(imageData.camera.C - Cast<REAL>(point));
+			viewDirSum += viewDir;
+		}
+		pointcloud.normals[ID] = normalized(viewDirSum);
+	}
+	if (!bRefine)
+		return true; // coarse normals estimated, but skip refinement
+
+	// Refine normals using ZNCC correlation between the point views
+	// for each point, the depth is known, and we have a coarse normal estimate;
+	// choose the target view as the view with the best score, score computed as
+	// score = exp(-0.5 * (angle(viewDir, normal) / sigma)^2) / Camera::GetFootprintWorld(depth);
+	// using the homography matrix given by the plane define by the point and the normal,
+	// project each pixel from the target view patch to every reference view and compute the ZNCC score;
+	// use gradient descent to refine the normal estimate, keeping the depth constant.
+
+	// Load images
+	// TODO: replace with images cache
+	bool bImagesReloaded(false);
+	#ifdef SCENE_USE_OPENMP
+	#pragma omp parallel for
+	for (int64_t _idx=0; _idx<(int64_t)images.size(); ++_idx) {
+		const IIndex idx(static_cast<IIndex>(_idx));
+	#else
+	FOREACH(idx, images) {
+	#endif
+		Image& imageData = images[idx];
+		if (!imageData.IsValid())
+			continue;
+		if (imageData.image.empty())
+			bImagesReloaded = true; // need to reload images
+		if (!imageData.ReloadImage(1024)) {
+			DEBUG("error: cannot reload image '%s'", imageData.name.c_str());
+			exit(EXIT_FAILURE);
+		}
+		imageData.UpdateCamera(platforms);
+	}
+
+	// Refine normals using lmmin optimization with ZNCC correlation
+	constexpr int patchRadius = 3; // Half-size of the patch window
+	constexpr int patchSize = patchRadius * 2 + 1;
+	constexpr int nTexels = patchSize * patchSize;
+	constexpr float sigmaAngle = FD2R(15.f); // 15 degrees sigma for angle weighting
+	constexpr float sigmaAngleInv = -1.f / (2.f * SQUARE(sigmaAngle));
+	typedef Sampler::Linear<float> Sampler;
+	const Sampler sampler;
+	typedef RobustNorm::Cauchy<double> RobustNormFunc;
+	const RobustNormFunc robust(0.7);
+
+	// Define optimization data structure
+	struct NormalOptimizationData {
+		const PointCloud::Point& point;
+		const PointCloud::ViewArr& views;
+		const ImageArr& images;
+		IIndex targetViewIdx;
+		Point2f targetProjection;
+		std::array<float,nTexels> targetPatch;
+		double targetVariance;
+		const Sampler& sampler;
+		const RobustNormFunc& robust;
+
+		NormalOptimizationData(const PointCloud::Point& _point, const PointCloud::ViewArr& _views,
+		                       const ImageArr& _images, IIndex _targetViewIdx, const Point2f& _targetProjection,
+		                       const std::array<float,nTexels>& _targetPatch,
+		                       double _targetVariance, const Sampler& _sampler, const RobustNormFunc& _robust)
+			: point(_point), views(_views), images(_images), targetViewIdx(_targetViewIdx),
+			  targetProjection(_targetProjection), targetPatch(_targetPatch),
+			  targetVariance(_targetVariance), sampler(_sampler), robust(_robust) {}
+
+		static void Residuals(const double* x, int nPoints, const void* pData, double* fvec, double* fjac, int* /*info*/) {
+			const NormalOptimizationData& data = *reinterpret_cast<const NormalOptimizationData*>(pData);
+			ASSERT(fjac == NULL); // We don't provide Jacobian, let lmmin compute it numerically
+			// Convert spherical coordinates to normal vector
+			Point3 normal;
+			Dir2Normal(*reinterpret_cast<const Point2d*>(x), normal);
+			// Ensure normal points toward target camera
+			const Camera& targetCamera = data.images[data.views[data.targetViewIdx]].camera;
+			const Point3 viewDir = normalized(targetCamera.C - Cast<REAL>(data.point));
+			if (normal.dot(viewDir) < 0)
+				normal = -normal;
+			const Plane plane(normal, Cast<REAL>(data.point));
+			// Compute ZNCC residuals for each reference view
+			FOREACH(refViewIdx, data.views) {
+				if (refViewIdx == data.targetViewIdx) {
+					fvec[refViewIdx] = 0; // zero residual if target view
+					continue;
+				}
+				const Image& refImage = data.images[data.views[refViewIdx]];
+				ASSERT(refImage.IsValid() && !refImage.image.empty());
+				// Sample reference patch using plane projection
+				std::array<float,nTexels> refPatch;
+				int validTexels = 0;
+				double refMean = 0.f;
+				for (int dy = -patchRadius; dy <= patchRadius; ++dy) {
+					for (int dx = -patchRadius; dx <= patchRadius; ++dx) {
+						const Point2f targetPos = data.targetProjection + Point2f(dx, dy);
+						// Back-project target pixel to 3D using the refined normal
+						const Ray3 ray(targetCamera.C, normalized(targetCamera.RayPoint(Cast<REAL>(targetPos))));
+						// Intersect ray with plane to get 3D point
+						Point3::EVec X3D;
+						if (!ray.Intersects(plane, false, NULL, &X3D))
+							continue;
+						// Project 3D point to reference image
+						const Point2f refPos = refImage.camera.TransformPointW2I(Point3(X3D));
+						if (refImage.image.isInsideWithBorder<float,1>(refPos)) {
+							const Pixel32F pixelValue = refImage.image.sample<Sampler,Pixel32F>(data.sampler, refPos);
+							const float intensity = pixelValue.r * 0.299f + pixelValue.g * 0.587f + pixelValue.b * 0.114f;
+							refPatch[validTexels++] = intensity;
+							refMean += intensity;
+						}
+					}
+				}
+				if (validTexels < nTexels) {
+					fvec[refViewIdx] = 0.9; // no valid texture, large residual
+					continue;
+				}
+				refMean /= nTexels;
+				// Compute reference patch variance and ZNCC
+				double refVariance(0), correlation(0);
+				for (int i = 0; i < nTexels; ++i) {
+					const double refDiff = static_cast<double>(refPatch[i]) - refMean;
+					refVariance += refDiff * refDiff;
+					correlation += static_cast<double>(data.targetPatch[i]) * refDiff;
+				}
+				// Set residuals
+				if (refVariance > 1e-8) {
+					const double zncc = CLAMP(correlation / SQRT(data.targetVariance * refVariance), -1.0, 1.0);
+					fvec[refViewIdx] = data.robust(1.0 - zncc); // maximize ZNCC, so minimize negative ZNCC
+				} else {
+					fvec[refViewIdx] = 0.9; // no valid texture, large residual
+				}
+			}
+		}
+	};
+
+	#ifdef SCENE_USE_OPENMP
+	#pragma omp parallel for
+	for (int64_t _ID=0; _ID<(int64_t)pointcloud.points.size(); ++_ID) {
+		const IIndex ID(static_cast<IIndex>(_ID));
+	#else
+	FOREACH(ID, pointcloud.points) {
+	#endif
+		const PointCloud::Point& point = pointcloud.points[ID];
+		const PointCloud::ViewArr& views = pointcloud.pointViews[ID];
+		Point3f& normal = pointcloud.normals[ID];
+		// Find the best target view based on angle and footprint
+		IIndex bestTargetIdx = NO_ID;
+		float bestScore = -1.f;
+		Point2f bestProjection;
+		FOREACH(viewIdx, views) {
+			const Image& imageData = images[views[viewIdx]];
+			ASSERT(imageData.IsValid() && !imageData.image.empty());
+			const Camera& camera = imageData.camera;
+			const Point3f viewDir = normalized(camera.C - Cast<REAL>(point));
+			const Depth depth = (Depth)camera.PointDepth(point);
+			if (depth <= 0)
+				continue;
+			// Project point to image
+			const Point2f projection = camera.ProjectPointP(point);
+			if (!imageData.image.isInsideWithBorder<float>(projection, patchRadius))
+				continue;
+			// Compute view score: angle compatibility and footprint
+			const float angle = ACOS(ComputeAngleN(normal.ptr(), viewDir.ptr()));
+			const float angleWeight = EXP(SQUARE(angle) * sigmaAngleInv);
+			const float footprint = camera.GetFootprintImage(depth);
+			const float score = angleWeight / footprint;
+			if (score > bestScore) {
+				bestScore = score;
+				bestTargetIdx = viewIdx;
+				bestProjection = projection;
+			}
+		}
+		if (bestTargetIdx == NO_ID)
+			continue;
+		const Image& targetImage = images[views[bestTargetIdx]];
+
+		// Extract target patch - convert to grayscale intensities
+		std::array<float,nTexels> targetPatch;
+		double targetMean(0);
+		int validTexels = 0;
+		for (int dy = -patchRadius; dy <= patchRadius; ++dy) {
+			for (int dx = -patchRadius; dx <= patchRadius; ++dx) {
+				const Point2f samplePos = bestProjection + Point2f(dx, dy);
+				if (targetImage.image.isInsideWithBorder<float,1>(samplePos)) {
+					const Pixel32F pixelValue = targetImage.image.sample<Sampler,Pixel32F>(sampler, samplePos);
+					const float intensity = pixelValue.r * 0.299f + pixelValue.g * 0.587f + pixelValue.b * 0.114f;
+					targetPatch[validTexels++] = intensity;
+					targetMean += intensity;
+				}
+			}
+		}
+		if (validTexels < nTexels)
+			continue;
+		targetMean /= nTexels;
+
+		// Compute target patch variance
+		double targetVariance(0);
+		for (int i = 0; i < validTexels; ++i) {
+			const double diff = static_cast<double>(targetPatch[i]) - targetMean;
+			targetPatch[i] = diff; // Store normalized values
+			targetVariance += diff * diff;
+		}
+		if (targetVariance < 1e-6) // Skip texture-less patches
+			continue;
+
+		// Create optimization data
+		Point2d paramN;
+		Normal2Dir(normal, paramN); // Convert normal to spherical coordinates
+		NormalOptimizationData optData(point, views, images, bestTargetIdx, bestProjection,
+		                               targetPatch, targetVariance, sampler, robust);
+		// Setup and run lmmin optimization
+		constexpr int numParams(2);
+		lm_control_struct control{1.e-6, 1.e-7, 1.e-8, 1.e-7, 100.0, 100}; // similar to lm_control_float
+		lm_status_struct status;
+		lmmin(numParams, paramN.ptr(), views.size(), &optData, NormalOptimizationData::Residuals, &control, &status);
+		// Check if optimization succeeded and update normal
+		if (status.info < 4) {
+			// Convert optimized spherical coordinates back to normal vector
+			Dir2Normal(paramN, normal);
+			// Ensure normal points toward target camera
+			const Point3f viewDir = normalized(targetImage.camera.C - Cast<REAL>(point));
+			if (normal.dot(viewDir) < 0)
+				normal = -normal; // Flip normal if it points away from target camera
+		}
+		// Note: If optimization fails, keep the original normal estimate
+	}
+
+	if (bImagesReloaded) {
+		// Release images
+		for (Image& imageData: images)
+			imageData.ReleaseImage();
+	}
+	return true;
+} // EstimatePointCloudNormals
+/*----------------------------------------------------------------*/
+
+// Build an approximate surface from the sparse point cloud by creating
+// an oriented square (as two triangles) centered at each point, aligned by its normal.
+// The square size is estimated from local neighbor spacing using a KD-tree (nanoflann).
+// - kNeighbors: number of neighbors used to estimate spacing (>=3)
+// - sizeScale: scales the median neighbor distance to get the square side (typ. 0.8-1.0)
+// - normalAngleMax: only neighbors with normals within this angle are considered (radians)
+namespace {
+// nanoflann adaptor for PointCloud::points (3D float)
+struct PointCloudAdaptor3f {
+	const MVS::PointCloud::Point* pts; size_t n;
+	inline PointCloudAdaptor3f(const MVS::PointCloud::Point* p, size_t _n): pts(p), n(_n) {}
+	inline size_t kdtree_get_point_count() const { return n; }
+	inline float kdtree_get_pt(const size_t idx, int dim) const { return pts[idx][dim]; }
+	template <class BBOX> bool kdtree_get_bbox(BBOX&) const { return false; }
+};
+} // anonymous namespace
+bool Scene::EstimateSparseSurface(unsigned kNeighbors, float sizeScale, float normalAngleMax)
+{
+	// Ensure normals exist
+	mesh.Release();
+	if (pointcloud.normals.size() != pointcloud.points.size() && !EstimatePointCloudNormals())
+		return false;
+
+	// Build KD-tree over sparse points
+	PointCloudAdaptor3f adaptor(pointcloud.points.data(), pointcloud.points.size());
+	using KDTree = nanoflann::KDTreeSingleIndexAdaptor<
+		nanoflann::L2_Simple_Adaptor<float, PointCloudAdaptor3f>, PointCloudAdaptor3f, 3>;
+	KDTree kdtree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams());
+	kdtree.buildIndex();
+
+	const uint32_t N = pointcloud.points.size();
+	const unsigned k = MAXF(3u, kNeighbors);
+	const float cosMax = COS(normalAngleMax);
+	const nanoflann::SearchParameters searchParams(0, false);
+
+	// Compute per-point square half-size using median neighbor distance from co-planar neighbors
+	std::vector<float> halfSizes(N);
+	std::vector<size_t> idxs(k+1);
+	std::vector<float> dists(k+1);
+	for (uint32_t i = 0; i < N; ++i) {
+		nanoflann::KNNResultSet<float> rs(k+1);
+		rs.init(idxs.data(), dists.data());
+		kdtree.findNeighbors(rs, pointcloud.points[i].ptr(), searchParams);
+		// Collect neighbor distances that are roughly co-planar (normal-aligned)
+		FloatArr neighDists(0, k);
+		const Point3f& n0 = pointcloud.normals[i];
+		for (size_t j = 0; j < rs.size(); ++j) {
+			const float dSq = dists[j];
+			if (dSq <= 0)
+				continue; // skip self
+			if (normalAngleMax > 0) {
+				// keep neighbors with similar surface orientation
+				const size_t ni = idxs[j];
+				const Point3f& nj = pointcloud.normals[ni];
+				const float cosang = ComputeAngleN(n0.ptr(), nj.ptr());
+				if (cosang < cosMax)
+					continue;
+			}
+			neighDists.push_back(dSq);
+		}
+		// median
+		const float median = neighDists.size() < 2 ? 0.f : SQRT(neighDists.GetMedian());
+		halfSizes[i] = 0.5f * sizeScale * median; // half of side length
+	}
+
+	// Skip points with zero half-size or too large half-size
+	const auto EstimateMaxHalfSize = [](const std::vector<float>& halfSizes) -> float {
+		// Create a copy of halfSizes excluding zero values
+		std::vector<float> nonZeroHalfSizes;
+		nonZeroHalfSizes.reserve(halfSizes.size());
+		for (float h : halfSizes)
+			if (h > 0)
+				nonZeroHalfSizes.push_back(h);
+		const std::pair<float,float> th(ComputeX84Threshold(nonZeroHalfSizes.data(), nonZeroHalfSizes.size(), 7.f));
+		return th.first+th.second;
+	};
+	const float maxHalfSize = EstimateMaxHalfSize(halfSizes);
+	uint32_t nValid = 0;
+	for (float& h : halfSizes) {
+		if (h > 0 && h < maxHalfSize)
+			++nValid;
+		else
+			h = 0;
+	}
+	if (nValid == 0)
+		return false;
+
+	// Allocate mesh: 4 vertices and 2 faces per valid point
+	mesh.vertices.resize(nValid * 4);
+	mesh.faces.resize(nValid * 2);
+
+	// Build orthonormal frame and write vertices/faces
+	auto BuildFrame = [](const Point3f& n, Point3f& u, Point3f& v) {
+		// robust tangent basis from normal
+		Point3f a = ABS(n.x) > ABS(n.z) ? Point3f(-n.y, n.x, 0.f) : Point3f(0.f, -n.z, n.y);
+		u = normalized(a);
+		v = normalized(n.cross(u));
+	};
+
+	uint32_t outIdx = 0; // quad index
+	#ifdef SCENE_USE_OPENMP
+	// To allow parallel fill, compute a mapping from input point index to output quad index
+	std::vector<uint32_t> quadIndex(N);
+	for (uint32_t i = 0; i < N; ++i)
+		if (halfSizes[i] > 0)
+			quadIndex[i] = outIdx++;
+	#pragma omp parallel for schedule(static)
+	for (int64_t _i = 0; _i < (int64_t)N; ++_i) {
+		const uint32_t i = (uint32_t)_i;
+		if (halfSizes[i] <= 0)
+			continue;
+		const uint32_t qi = quadIndex[i];
+	#else
+	for (uint32_t i = 0; i < N; ++i) {
+		if (halfSizes[i] <= 0)
+			continue;
+		const uint32_t qi = outIdx++;
+	#endif
+		const Mesh::VIndex vbase(qi * 4);
+		const Mesh::FIndex fbase(qi * 2);
+		const Point3f& p = pointcloud.points[i];
+		const Point3f& n = pointcloud.normals[i];
+		Point3f u, v;
+		BuildFrame(n, u, v);
+		const float h = halfSizes[i];
+		// Square corners in plane
+		mesh.vertices[vbase + 0] = p + (-u - v) * h;
+		mesh.vertices[vbase + 1] = p + ( u - v) * h;
+		mesh.vertices[vbase + 2] = p + ( u + v) * h;
+		mesh.vertices[vbase + 3] = p + (-u + v) * h;
+		// Two triangles: (0,1,2) and (0,2,3)
+		mesh.faces[fbase + 0] = Mesh::Face(vbase + 0, vbase + 1, vbase + 2);
+		mesh.faces[fbase + 1] = Mesh::Face(vbase + 0, vbase + 2, vbase + 3);
+	}
+	return true;
+}
+/*----------------------------------------------------------------*/
+
 // create a virtual point-cloud to be used to initialize the neighbor view
 // from image pair points at the intersection of the viewing directions
 bool Scene::EstimateNeighborViewsPointCloud(unsigned maxResolution)
@@ -825,8 +1243,8 @@ bool Scene::EstimateNeighborViewsPointCloud(unsigned maxResolution)
 // and select the best views for reconstructing the dense point-cloud;
 // extract also all 3D points seen by the reference image;
 // (inspired by: "Multi-View Stereo for Community Photo Collections", Goesele, 2007)
-//  - nInsideROI: 0 - ignore ROI, 1 - weight more ROI points, 2 - consider only ROI points
-bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle, unsigned nInsideROI)
+//  - fWeightPointInsideROI: 0 - ignore ROI, between 0 and 1 - weight inside ROI points, 1 - consider only ROI points
+bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle, float fWeightPointInsideROI)
 {
 	ASSERT(points.empty());
 
@@ -847,21 +1265,17 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		nMinPointViews = nCalibratedImages;
 	unsigned nPoints = 0;
 	imageData.avgDepth = 0;
+	ASSERT(fWeightPointInsideROI >= 0 && fWeightPointInsideROI <= 1);
+	const bool bCheckInsideROI(fWeightPointInsideROI > 0 && IsBounded());
+	const float fWeightPointOutsideROI(bCheckInsideROI ? 1.f - fWeightPointInsideROI : 1.f);
 	const float sigmaAngleSmall(-1.f/(2.f*SQUARE(fOptimAngle*0.38f)));
 	const float sigmaAngleLarge(-1.f/(2.f*SQUARE(fOptimAngle*0.7f)));
-	const bool bCheckInsideROI(nInsideROI > 0 && IsBounded());
 	FOREACH(idx, pointcloud.points) {
 		const PointCloud::ViewArr& views = pointcloud.pointViews[idx];
 		ASSERT(views.IsSorted());
 		if (views.FindFirst(ID) == PointCloud::ViewArr::NO_INDEX)
 			continue;
 		const PointCloud::Point& point = pointcloud.points[idx];
-		float wROI(1.f);
-		if (bCheckInsideROI && !obb.Intersects(point)) {
-			if (nInsideROI > 1)
-				continue;
-			wROI = 0.7f;
-		}
 		const Depth depth((float)imageData.camera.PointDepth(point));
 		ASSERT(depth > 0);
 		if (depth <= 0)
@@ -869,6 +1283,9 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		// store this point
 		if (views.size() >= nMinPointViews)
 			points.push_back((uint32_t)idx);
+		const float wROI(bCheckInsideROI && obb.Intersects(point) ? fWeightPointInsideROI : fWeightPointOutsideROI);
+		if (wROI <= 0)
+			continue;
 		imageData.avgDepth += depth;
 		++nPoints;
 		// score shared views
@@ -965,7 +1382,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 	return true;
 } // SelectNeighborViews
 
-void Scene::SelectNeighborViews(unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle, unsigned nInsideROI)
+void Scene::SelectNeighborViews(unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle, float fWeightPointInsideROI)
 {
 	#ifdef SCENE_USE_OPENMP
 	for (int_t ID=0; ID<(int_t)images.size(); ++ID) {
@@ -975,7 +1392,7 @@ void Scene::SelectNeighborViews(unsigned nMinViews, unsigned nMinPointViews, flo
 	#endif
 		// select image neighbors
 		IndexArr points;
-		SelectNeighborViews(idxImage, points, nMinViews, nMinPointViews, fOptimAngle, nInsideROI);
+		SelectNeighborViews(idxImage, points, nMinViews, nMinPointViews, fOptimAngle, fWeightPointInsideROI);
 	}
 } // SelectNeighborViews
 /*----------------------------------------------------------------*/
@@ -1115,7 +1532,7 @@ bool Scene::ExportLinesPLY(const String& fileName, const CLISTDEF0IDX(Line3f,uin
 		v.x = line.pt2.x(); v.y = line.pt2.y(); v.z = line.pt2.z();
 		ply.put_element(&v);
 	}
-	
+
 	// describe what properties go into the edge elements
 	if (colors) {
 		ply.describe_property("edge", 5, edge_props);
@@ -1134,7 +1551,7 @@ bool Scene::ExportLinesPLY(const String& fileName, const CLISTDEF0IDX(Line3f,uin
 			ply.put_element(&edge);
 		}
 	}
-	
+
 	// write to file
 	return ply.header_complete();
 } // ExportLinesPLY
@@ -1172,8 +1589,8 @@ unsigned Scene::Split(ImagesChunkArr& chunks, float maxArea, int depthMapStep) c
 				continue;
 			const IIndex numPointsBegin(visibility.size());
 			const Camera camera(imageData.GetCamera(platforms, depthData.depthMap.size()));
-			for (int r=(depthData.depthMap.rows%depthMapStep)/2; r<depthData.depthMap.rows; r+=depthMapStep) {
-				for (int c=(depthData.depthMap.cols%depthMapStep)/2; c<depthData.depthMap.cols; c+=depthMapStep) {
+			for (int r=(depthData.depthMap.rows%depthMapStep)/2; r<depthData.depthMap.rows; r++) {
+				for (int c=(depthData.depthMap.cols%depthMapStep)/2; c<depthData.depthMap.cols; c++) {
 					const Depth depth = depthData.depthMap(r,c);
 					if (depth <= 0)
 						continue;
@@ -1491,6 +1908,50 @@ bool Scene::ScaleImages(unsigned nMaxResolution, REAL scale, const String& folde
 	return true;
 } // ScaleImages
 
+// compute translation and scale (optional) such that the scene coordinates center at 0 and
+// most scene geomatry is in the unit cube ([-0.5,0.5]^3);
+// return the transformation matrix that restores the scene to its original coordinates
+Matrix4x4 Scene::ComputeNormalizationTransform(bool bScale) const
+{
+	ASSERT(!pointcloud.IsEmpty() || !mesh.IsEmpty());
+	// compute the center of the scene geometry (point-cloud or mesh)
+	Point3 center = Point3::ZERO;
+	if (!mesh.IsEmpty()) {
+		for (const Mesh::Vertex& X: mesh.vertices)
+			center += Cast<REAL>(X);
+		center /= static_cast<REAL>(mesh.vertices.size());
+	} else {
+		for (const PointCloud::Point& X: pointcloud.points)
+			center += Cast<REAL>(X);
+		center /= static_cast<REAL>(pointcloud.points.size());
+	}
+	// compute the scale of the scene geometry (point-cloud or mesh)
+	REAL scale = 1;
+	if (bScale) {
+		REAL avgDist = 0;
+		if (!mesh.IsEmpty()) {
+			for (const Mesh::Vertex& X: mesh.vertices)
+				avgDist += norm(Cast<REAL>(X)-center);
+			avgDist /= static_cast<REAL>(mesh.vertices.size());
+		} else {
+			for (const PointCloud::Point& X: pointcloud.points)
+				avgDist += norm(Cast<REAL>(X)-center);
+			avgDist /= static_cast<REAL>(pointcloud.points.size());
+		}
+		scale = REAL(2) * avgDist;
+	}
+	// compute the transformation matrix
+	Matrix4x4 transform = Matrix4x4::ZERO;
+	transform(0,0) = scale;
+	transform(1,1) = scale;
+	transform(2,2) = scale;
+	transform(0,3) = center.x;
+	transform(1,3) = center.y;
+	transform(2,3) = center.z;
+	transform(3,3) = 1;
+    return transform;
+} // ComputeNormalizationTransform
+
 // apply similarity transform
 void Scene::Transform(const Matrix3x3& rotation, const Point3& translation, REAL scale)
 {
@@ -1522,6 +1983,10 @@ void Scene::Transform(const Matrix3x3& rotation, const Point3& translation, REAL
 		obb.Transform(Cast<float>(rotationScale));
 		obb.Translate(Cast<float>(translation));
 	}
+	transform = Matrix4x4::IDENTITY;
+	Matrix4x4::EMatMap mapTransform(transform);
+	mapTransform.topLeftCorner<3,3>() = static_cast<Matrix3x3::CEMatMap>(rotationScale);
+	mapTransform.topRightCorner<3,1>() = static_cast<Point3::CEVecMap>(translation);
 }
 void Scene::Transform(const Matrix3x4& transform)
 {
@@ -1554,7 +2019,7 @@ bool Scene::AlignTo(const Scene& scene)
 		DEBUG("error: the two scenes differ in number of cameras");
 		return false;
 	}
-	CLISTDEF0(Point3) points, pointsRef;
+	Point3Arr points, pointsRef;
 	FOREACH(idx, images) {
 		const Image& image = images[idx];
 		if (!image.IsValid())
@@ -1565,8 +2030,7 @@ bool Scene::AlignTo(const Scene& scene)
 		points.emplace_back(image.camera.C);
 		pointsRef.emplace_back(imageRef.camera.C);
 	}
-	Matrix4x4 transform;
-	SimilarityTransform(points, pointsRef, transform);
+	Matrix4x4 transform = SimilarityTransform(points, pointsRef);
 	Matrix3x3 rotation; Point3 translation; REAL scale;
 	DecomposeSimilarityTransform(transform, rotation, translation, scale);
 	Transform(rotation, translation, scale);
@@ -1743,108 +2207,280 @@ Scene& Scene::CropToROI(const OBB3f& obb, unsigned minNumPoints)
 	}
 	return *this = SubScene(idxImages);
 }
-/*----------------------------------------------------------------*/
 
+// increase point weights for the points close to the camera
+void PromoteClosePoints(DepthArr& pointDepths, FloatArr& pointWeights, unsigned numPointsStart, float downweightFar) {
+    const Depth thDepth = pointDepths.GetNth((pointDepths.size() + 5) / 10);
+    FOREACH(i, pointDepths) {
+        const Depth depth = pointDepths[i];
+        if (depth > thDepth)
+            pointWeights[numPointsStart+i] *= downweightFar;
+    }
+}
 
-// estimate region-of-interest based on camera positions, directions and sparse points
-// scale specifies the ratio of the ROI's diameter
-bool Scene::EstimateROI(int nEstimateROI, float scale)
+void MinMaxScale(FloatArr &arr) {
+    if (arr.empty())
+        return;
+    const auto [minVal, maxVal] = arr.GetMinMax();
+    const float range = maxVal - minVal;
+    if (range == 0.0f)
+        return;
+    for (size_t i = 0; i < arr.size(); ++i) {
+        arr[i] = (arr[i] - minVal) / range;
+    }
+}
+
+// Winsorize a vector in place: limits values below the lower percentile and above the upper percentile
+void Winsorize(FloatArr& data, float lower_percentile, float upper_percentile) {
+    if (data.empty() || lower_percentile < 0.0 || upper_percentile > 100.0 || lower_percentile > upper_percentile) {
+        throw std::invalid_argument("Invalid input or percentile range");
+    }
+
+    FloatArr sorted_data(data);
+    std::sort(sorted_data.begin(), sorted_data.end());
+
+    size_t n = sorted_data.size();
+    size_t lower_index = static_cast<size_t>(lower_percentile / 100.0 * (n - 1));
+    size_t upper_index = static_cast<size_t>(upper_percentile / 100.0 * (n - 1));
+
+    float lower_value = sorted_data[lower_index];
+    float upper_value = sorted_data[upper_index];
+
+    for (auto& value : data) {
+        if (value < lower_value) {
+            value = lower_value;
+        } else if (value > upper_value) {
+            value = upper_value;
+        }
+    }
+}
+
+float RadialWeight2D(int width, int height, int x, int y, float alpha=2) {
+    float x_center = (width - 1) * 0.5f;
+    float y_center = (height - 1) * 0.5f;
+
+    float R = std::sqrt(x_center * x_center + y_center * y_center);
+
+    float dx = x - x_center;
+    float dy = y - y_center;
+    float distance = std::sqrt(dx * dx + dy * dy);
+
+    float r = distance / R;
+
+    float weight = 1.0f - std::pow(r, alpha);
+    return (weight > 0.0f) ? weight : 0.0f;
+}
+
+FloatArr ComputeMeanDistanceToClosestN(const PointCloud::PointArr &pts, int numberOfNeighbors) {
+    FloatArr meanDistances(pts.size());
+    meanDistances.MemsetValue(0);
+
+    typedef CGAL::Simple_cartesian<double>                 K;
+    typedef CGAL::Search_traits_3<K>                       TreeTraits;
+    typedef CGAL::Orthogonal_k_neighbor_search<TreeTraits> K_neighbor_search;
+    typedef K_neighbor_search::Tree                        Tree;
+
+    std::vector<K::Point_3> cgalPoints;
+    cgalPoints.reserve(pts.size());
+    // Convert each 3D point to a CGAL point
+    for (const auto &p: pts)
+        cgalPoints.emplace_back(static_cast<double>(p.x), static_cast<double>(p.y), static_cast<double>(p.z));
+    // Build a KD-tree for neighbor searches
+    Tree tree(cgalPoints.begin(), cgalPoints.end());
+    // For each point, find its N nearest neighbors and compute average distance
+    for (size_t i = 0; i < cgalPoints.size(); ++i) {
+        K_neighbor_search search(tree, cgalPoints[i], numberOfNeighbors);
+        double sumDist = 0.0;
+        int count = 0;
+        for (auto it = search.begin(); it != search.end(); ++it) {
+            double dist = std::sqrt(it->second);  // it->second is squared distance
+            sumDist += dist;
+            count++;
+        }
+        if (count > 0) {
+            double meanDist = sumDist / static_cast<double>(count);
+            meanDistances[i] = static_cast<float>(meanDist);
+        }
+    }
+    return meanDistances;
+}
+
+// Compute a weight for each point in the scene point cloud based on:
+//  - proximity to image center
+//  - depth from camera
+//  - number of views observing the point
+//  - mean distance to closest neighbors in the point cloud
+FloatArr Scene::ROIPointWeights() const {
+    const int numberOfNeighbors = 16;
+    const float meanNeighborDistanceWLambda = 0.25f;
+    const float imageCenterWLambda = 0.25f;
+    const float numberOfViewsWLambda = 0;
+    const float depthWLambda = 1.f - meanNeighborDistanceWLambda - imageCenterWLambda - numberOfViewsWLambda;
+
+    FloatArr imageCenterWeights(pointcloud.points.size());
+    FloatArr depthWeights(pointcloud.points.size());
+    FloatArr numberOfViewsWeights(pointcloud.points.size());
+    FloatArr meanDistanceToClosestN(pointcloud.points.size());
+    imageCenterWeights.MemsetValue(0);
+    depthWeights.MemsetValue(0);
+
+    FloatArr pointcloudMeanDistanceToClosestN = ComputeMeanDistanceToClosestN(pointcloud.points, numberOfNeighbors);
+    FloatArr pointWeights(pointcloud.points.size());
+    FOREACH(idxPoint, pointcloud.points) {
+        const PointCloud::ViewArr &views = pointcloud.pointViews[idxPoint];
+        numberOfViewsWeights[idxPoint] = views.size();
+        const float meanDistanceWeight = 1.0f / (1.0f + pointcloudMeanDistanceToClosestN[idxPoint]);
+        meanDistanceToClosestN[idxPoint] = meanDistanceWeight;
+        FOREACH(idxView, views) {
+            int idxImage = views[idxView];
+            const Image &image = images[idxImage];
+            if (!image.IsValid())
+                continue;
+            const Point3f &X(pointcloud.points[idxPoint]);
+            const Point3 camX(image.camera.TransformPointW2C(Cast<REAL>(X)));
+            const Point2i pt(ROUND2INT(image.camera.TransformPointC2I(camX)));
+            if (!Image8U::isInside(pt, image.GetSize()))
+                continue;
+            const float depthWeight = 1.0f / (1.0f + camX.z);
+            depthWeights[idxPoint] += depthWeight;
+            const float imageCenterWeight = RadialWeight2D(image.width, image.height, pt.x, pt.y, 2.0f);
+            imageCenterWeights[idxPoint] += imageCenterWeight;
+        }
+    }
+    for (size_t i = 0; i < pointcloud.points.size(); ++i) {
+        depthWeights[i] /= numberOfViewsWeights[i];
+        imageCenterWeights[i] /= numberOfViewsWeights[i];
+    }
+
+    // Set top 10% and bottom 10% to 10th and 90th quantile, respectively
+    Winsorize(imageCenterWeights, 10.f, 90.f);
+    Winsorize(depthWeights, 10.f, 90.f);
+    Winsorize(meanDistanceToClosestN, 10.f, 90.f);
+
+    MinMaxScale(imageCenterWeights);
+    MinMaxScale(depthWeights);
+    MinMaxScale(numberOfViewsWeights);
+    MinMaxScale(meanDistanceToClosestN);
+
+    for (size_t i = 0; i < pointcloud.points.size(); ++i) {
+        pointWeights[i] = imageCenterWLambda * imageCenterWeights[i] +
+                          depthWLambda * depthWeights[i] +
+                          numberOfViewsWLambda * numberOfViewsWeights[i] +
+                          meanNeighborDistanceWLambda * meanDistanceToClosestN[i];
+    }
+
+	return pointWeights;
+}
+
+// estimate the region-of-interest (ROI) based on the known poses and sparse point-cloud
+//  - scaleROI: ROI scale factor, multipled after computation
+//  - upAxis: indicates the gravity direction (0 for x, 1 for y, 2 for z, -1 for 3D)
+bool Scene::EstimateROI(float scaleROI, int upAxis)
 {
-	ASSERT(nEstimateROI >= 0 && nEstimateROI <= 2 && scale > 0);
-	if (nEstimateROI == 0) {
-		DEBUG_ULTIMATE("The scene will be considered as unbounded (no ROI)");
+	if (!pointcloud.IsValid() || pointcloud.points.size() < 100 || images.size() < 4)
 		return false;
-	}
-	if (!pointcloud.IsValid()) {
-		VERBOSE("error: no valid point-cloud for the ROI estimation");
+	FloatArr pointWeights = ROIPointWeights();
+	if (pointWeights.size() < 30)
 		return false;
-	}
-	CameraArr cameras;
-	FOREACH(i, images) {
-		const Image& imageData = images[i];
-		if (!imageData.IsValid())
-			continue;
-		cameras.emplace_back(imageData.camera);
-	}
-	const unsigned nCameras = cameras.size();
-	if (nCameras < 3) {
-		VERBOSE("warning: not enough valid views for the ROI estimation");
-		return false;
-	}
-	// compute the camera center and the direction median
-	FloatArr x(nCameras), y(nCameras), z(nCameras), nx(nCameras), ny(nCameras), nz(nCameras);
-	FOREACH(i, cameras) {
-		const Point3f camC(cameras[i].C);
-		x[i] = camC.x;
-		y[i] = camC.y;
-		z[i] = camC.z;
-		const Point3f camDirect(cameras[i].Direction());
-		nx[i] = camDirect.x;
-		ny[i] = camDirect.y;
-		nz[i] = camDirect.z;
-	}
-	const CMatrix camCenter(x.GetMedian(), y.GetMedian(), z.GetMedian());
-	CMatrix camDirectMean(nx.GetMean(), ny.GetMean(), nz.GetMean());
-	const float camDirectMeanLen = (float)norm(camDirectMean);
-	if (!ISZERO(camDirectMeanLen))
-		camDirectMean /= camDirectMeanLen;
-	if (camDirectMeanLen > FSQRT_2 / 2.f && nEstimateROI == 2) {
-		VERBOSE("The camera directions mean is unbalanced; the scene will be considered unbounded (no ROI)");
-		return false;
-	}
-	DEBUG_ULTIMATE("The camera positions median is (%f,%f,%f), directions mean and norm are (%f,%f,%f), %f",
-				   camCenter.x, camCenter.y, camCenter.z, camDirectMean.x, camDirectMean.y, camDirectMean.z, camDirectMeanLen);
-	FloatArr cameraDistances(nCameras);
-	FOREACH(i, cameras)
-		cameraDistances[i] = (float)cameras[i].Distance(camCenter);
-	// estimate scene center and radius
-	const float camDistMed = cameraDistances.GetMedian();
-	const float camShiftCoeff = TAN(ASIN(CLAMP(camDirectMeanLen, 0.f, 0.999f)));
-	const CMatrix sceneCenter = camCenter + camShiftCoeff * camDistMed * camDirectMean;
-	FOREACH(i, cameras) {
-		if (cameras[i].PointDepth(sceneCenter) <= 0 && nEstimateROI == 2) {
-			VERBOSE("Found a camera not pointing towards the scene center; the scene will be considered unbounded (no ROI)");
-			return false;
-		}
-		cameraDistances[i] = (float)cameras[i].Distance(sceneCenter);
-	}
-	const float sceneRadius = cameraDistances.GetMax();
-	DEBUG_ULTIMATE("The estimated scene center is (%f,%f,%f), radius is %f",
-				   sceneCenter.x, sceneCenter.y, sceneCenter.z, sceneRadius);
-	Point3fArr ptsInROI;
-	FOREACH(i, pointcloud.points) {
-		const PointCloud::Point& point = pointcloud.points[i];
-		const PointCloud::ViewArr& views = pointcloud.pointViews[i];
-		FOREACH(j, views) {
-			const Image& imageData = images[views[j]];
-			if (!imageData.IsValid())
-				continue;
-			const Camera& camera = imageData.camera;
-			if (camera.PointDepth(point) < sceneRadius * 2.0f) {
-				ptsInROI.emplace_back(point);
-				break;
-			}
-		}
-	}
-	obb.Set(AABB3f(ptsInROI.begin(), ptsInROI.size()).EnlargePercent(scale));
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-	if (VERBOSITY_LEVEL > 2) {
-		VERBOSE("Set the ROI with the AABB of position (%f,%f,%f) and extent (%f,%f,%f)",
-			    obb.m_pos[0], obb.m_pos[1], obb.m_pos[2], obb.m_ext[0], obb.m_ext[1], obb.m_ext[2]);
-	} else {
-		VERBOSE("Set the ROI by the estimated core points");
-	}
-	#endif
+	// compute threshold using robust statistics
+	const auto [median, trustRegionSize] = ComputeX84Threshold(pointWeights.data(), pointWeights.size(), 0.7f);
+	Line3f camCenterLine;
+	bool isTower = ComputeCenterLine(camCenterLine);
+	const Depth threshold = isTower ? (median + 2*trustRegionSize) : (median - trustRegionSize / 2);
+    DEBUG_ULTIMATE("ROI threshold median: %f, trust region size: %f, threshold: %f", median, trustRegionSize, threshold);
+	// keep only points above the threshold
+	std::vector<Eigen::Vector3f> points;
+	points.reserve(pointcloud.points.size());
+	RFOREACH(i, pointcloud.points)
+		if (pointWeights[i] > threshold)
+			points.emplace_back(Cast<float>(pointcloud.points[i]));
+	obb.Set(points.data(), points.size(), 0, upAxis);
+	obb.EnlargePercent(scaleROI);
+	VERBOSE("ROI estimated with position (%f,%f,%f) and extent (%f,%f,%f): scale %f, up axis %d",
+			obb.m_pos[0], obb.m_pos[1], obb.m_pos[2], obb.m_ext[0], obb.m_ext[1], obb.m_ext[2],
+			scaleROI, upAxis);
 	return true;
 } // EstimateROI
 /*----------------------------------------------------------------*/
 
+// compute the average distance between cameras and scene (or ROI if specified and exists):
+//  - depthPercentile: percentile of closest points to consider for each image (0-1)
+//  - bForceRecompute: force recomputation even if already available for each image
+//  - bUseROI: use the ROI if it exists, otherwise use the entire scene
+// return the average depth over all images
+float Scene::ComputeDistanceCameras2Scene(float depthPercentile, bool bForceRecompute, bool bUseROI)
+{
+	// for each image, compute the average distance between the camera and the scene points it sees;
+	// the average is computed on the Nth percentile of the closest points
+	const OBB3f* pObb = bUseROI && IsBounded() ? &obb : NULL;
+	REAL sumDepth = 0;
+	unsigned nImages = 0;
+	#ifdef SCENE_USE_OPENMP
+	#pragma omp parallel for reduction(+:sumDepth,nImages) //schedule(dynamic)
+	for (int64_t _idx=0; _idx<(int64_t)images.size(); ++_idx) {
+		const IIndex idx(static_cast<IIndex>(_idx));
+	#else
+	FOREACH(idx, images) {
+	#endif
+		Image& imageData = images[idx];
+		if (!imageData.IsValid())
+			continue;
+		if (bForceRecompute || imageData.avgDepth <= 0) {
+			// recompute average depth
+			FloatArr depths;
+			FOREACH(idxPoint, pointcloud.points) {
+				const PointCloud::ViewArr& views = pointcloud.pointViews[idxPoint];
+				for (PointCloud::View idxView: views) {
+					if (idxView != idx)
+						continue;
+					const Point3f& point = pointcloud.points[idxPoint];
+					if (!pObb || pObb->Intersects(point))
+						depths.emplace_back(imageData.camera.PointDepth(point));
+					break;
+				}
+			}
+			if (depths.empty()) {
+				imageData.avgDepth = 0;
+				continue;
+			}
+			imageData.avgDepth = depths.GetNth(ROUND2INT<IDX>((depths.size()-1) * depthPercentile));
+		}
+		sumDepth += static_cast<REAL>(imageData.avgDepth);
+		++nImages;
+	}
+	return nImages == 0 ? 0.f : static_cast<float>(sumDepth / nImages);
+}
+/*----------------------------------------------------------------*/
+
+
+// Compute the center line of the tower by fitting a line to the camera positions
+// Returns true if the camera poses describe a cylinder, false otherwise
+bool Scene::ComputeCenterLine(Line3f &camCenterLine) const {
+	if (images.size() < 20) {
+		DEBUG_ULTIMATE("error: too few images to be a tower: '%d'", images.size());
+		return false;
+	}
+	FitLineOnline<float> fitline;
+	FOREACH(imgIdx, images) {
+		const Eigen::Vector3f camPos(Cast<float>(images[imgIdx].camera.C));
+		fitline.Update(camPos);
+	}
+	Point3f quality = fitline.GetLine(camCenterLine);
+	// check if ROI is mostly long and narrow on one direction
+	if (quality.y / quality.z > 0.6f || quality.x / quality.y < 0.8f) {
+		// does not seem to be a line
+		DEBUG_ULTIMATE("scene does not seem to be a tower: X(%.2f), Y(%.2f), Z(%.2f)", quality.x, quality.y, quality.z);
+		return false;
+	}
+	return true;
+}
 
 // calculate the center(X,Y) of the cylinder, the radius and min/max Z
-// from camera position and sparse point cloud, if that exists
+// from camera position and sparse point-cloud, if that exists
 // returns result of checks if the scene camera positions satisfies tower criteria:
 //	- cameras fit a long and slim bounding box
 //  - majority of cameras focus toward a middle line
+// Tower mode is assumed to be nonzero
 bool Scene::ComputeTowerCylinder(Point2f& centerPoint, float& fRadius, float& fROIRadius, float& zMin, float& zMax, float& minCamZ, const int towerMode)
 {
 	// disregard tower mode for scenes with less than 20 cameras
@@ -1853,33 +2489,25 @@ bool Scene::ComputeTowerCylinder(Point2f& centerPoint, float& fRadius, float& fR
 		return false;
 	}
 
+	Line3f camCenterLine;
+	if (!ComputeCenterLine(camCenterLine))
+		return false;
+
 	AABB3f aabbOutsideCameras(true);
 	CLISTDEF0(Point2f) cameras2D(images.size());
 	FloatArr camHeigths;
-	FitLineOnline<float> fitline;
 	FOREACH(imgIdx, images) {
 		const Eigen::Vector3f camPos(Cast<float>(images[imgIdx].camera.C));
-		fitline.Update(camPos);
 		aabbOutsideCameras.InsertFull(camPos);
 		cameras2D[imgIdx] = Point2f(camPos.x(), camPos.y());
 		camHeigths.InsertSortUnique(camPos.z());
-	}
-	Line3f camCenterLine;
-	Point3f quality = fitline.GetLine(camCenterLine);
-	// check if ROI is mostly long and narrow on one direction
-	if (quality.y / quality.z > 0.6f || quality.x / quality.y < 0.8f) {
-		// does not seem to be a line
-		if (towerMode > 0) {
-			DEBUG_ULTIMATE("error: does not seem to be a tower: X(%.2f), Y(%.2f), Z(%.2f)", quality.x, quality.y, quality.z);
-			return false;
-		}
 	}
 
 	// get the height of the lowest camera
 	minCamZ = aabbOutsideCameras.ptMin.z();
 	centerPoint = ((camCenterLine.pt1+camCenterLine.pt2)*0.5f).topLeftCorner<2,1>();
 	zMin = MINF(aabbOutsideCameras.ptMax.z(), aabbOutsideCameras.ptMin.z()) - 5;
-	// if sparse point cloud is loaded use lowest point as zMin
+	// if sparse point-cloud is loaded use lowest point as zMin
 	float fMinPointsZ = std::numeric_limits<float>::max();
 	float fMaxPointsZ = std::numeric_limits<float>::lowest();
 	FOREACH(pIdx, pointcloud.points) {
@@ -1888,12 +2516,12 @@ bool Scene::ComputeTowerCylinder(Point2f& centerPoint, float& fRadius, float& fR
 			if (pz < fMinPointsZ)
 				fMinPointsZ = pz;
 			if (pz > fMaxPointsZ)
-				fMaxPointsZ = pz;			
+				fMaxPointsZ = pz;
 		}
 	}
 	zMin = MINF(zMin, fMinPointsZ);
 	zMax = MAXF(aabbOutsideCameras.ptMax.z(), fMaxPointsZ);
-	
+
 	// calculate tower radius as median distance from tower center to cameras
 	FloatArr cameraDistancesToMiddle(cameras2D.size());
 	FOREACH (camIdx, cameras2D)
@@ -1923,7 +2551,7 @@ size_t Scene::DrawCircle(PointCloud& pc, PointCloud::PointArr& outCircle, const 
 	for (unsigned pIdx = 0; pIdx < nTargetPoints; ++pIdx) {
 		const float fAngle(fStartAngle + fAngleBetweenPoints * pIdx);
 		ASSERT(fAngle <= FTWO_PI);
-		const Normal n(cos(fAngle), sin(fAngle), 0);
+		const Normal n(COS(fAngle), SIN(fAngle), 0);
 		ASSERT(ISEQUAL(norm(n), 1.f), "Norm = ", norm(n));
 		const Point3f newPoint(circleCenter + circleRadius * n);
 		// select cameras seeing this point
@@ -1959,8 +2587,8 @@ PointCloud Scene::BuildTowerMesh(const PointCloud& origPointCloud, const Point2f
 	PointCloud::PointArr circlePoints;
 	Mesh::VertexVerticesArr meshCircles;
 	if (bFixRadius) {
-		const unsigned nTargetPoints(MAX(10, ROUND2INT(FTWO_PI * fRadius * nTargetDensity))); // how many points on each circle
-		const float fAngleBetweenPoints(FTWO_PI / nTargetPoints); // the angle between neighbor points on the circle	
+		const unsigned nTargetPoints(MAXF(10, ROUND2INT(FTWO_PI * fRadius * nTargetDensity))); // how many points on each circle
+		const float fAngleBetweenPoints(FTWO_PI / nTargetPoints); // the angle between neighbor points on the circle
 		for (unsigned cIdx = 0; cIdx < nTargetCircles; ++cIdx) {
 			const Point3f circleCenter(centerPoint, zMin + fCircleFrequence * cIdx); // center point of the circle
 			const float fStartAngle(fAngleBetweenPoints * SEACAVE::random()); // starting angle for the first point
@@ -1988,7 +2616,7 @@ PointCloud Scene::BuildTowerMesh(const PointCloud& origPointCloud, const Point2f
 					bIdx--;
 				if (tIdx >= (int)nTargetCircles)
 					tIdx = nTargetCircles - 1;
-				if (bIdx < (int)nTargetCircles - 1)
+				if (bIdx < (int)nTargetCircles - 1 && bIdx >= 0)
 					sliceDistances[bIdx].emplace_back(d);
 				if (tIdx > 0)
 					sliceDistances[tIdx].emplace_back(d);
@@ -2005,8 +2633,8 @@ PointCloud Scene::BuildTowerMesh(const PointCloud& origPointCloud, const Point2f
 			} else {
 				if (pDistances.size() > 2) {
 					pDistances.Sort();
-					const size_t topIdx(MIN(pDistances.size() - 1, CEIL2INT<size_t>(pDistances.size() * 0.95f)));
-					const size_t botIdx(MAX(1u, FLOOR2INT<unsigned>(pDistances.size() * 0.5f)));
+					const size_t topIdx(MINF(pDistances.size() - 1, CEIL2INT<size_t>(pDistances.size() * 0.95f)));
+					const size_t botIdx(MAXF(1u, FLOOR2INT<unsigned>(pDistances.size() * 0.5f)));
 					float avgTopDistance(0);
 					for (size_t i = botIdx; i < topIdx; ++i)
 						avgTopDistance += pDistances[i];
@@ -2040,7 +2668,7 @@ PointCloud Scene::BuildTowerMesh(const PointCloud& origPointCloud, const Point2f
 			float circleRadius(circleRadii[rIdx]);
 			const float circleZ(zMax - fCircleFrequence * rIdx);
 			const Point3f circleCenter(centerPoint, circleZ); // center point of the circle
-			const unsigned nTargetPoints(MAX(10, ROUND2INT(FTWO_PI * circleRadius * nTargetDensity))); // how many points on each circle
+			const unsigned nTargetPoints(MAXF(10, ROUND2INT(FTWO_PI * circleRadius * nTargetDensity))); // how many points on each circle
 			const float fAngleBetweenPoints(FTWO_PI / nTargetPoints); // the angle between neighbor points on the circle
 			const float fStartAngle(fAngleBetweenPoints * SEACAVE::random()); // starting angle for the first point
 			DrawCircle(towerPC, circlePoints, circleCenter, circleRadius, nTargetPoints, fStartAngle, fAngleBetweenPoints);
@@ -2058,7 +2686,7 @@ PointCloud Scene::BuildTowerMesh(const PointCloud& origPointCloud, const Point2f
 			}
 		}
 	}
-	
+
 	#if TD_VERBOSE != TD_VERBOSE_OFF
 	if (VERBOSITY_LEVEL > 2) {
 		// Build faces from meshCircles
@@ -2128,6 +2756,8 @@ void Scene::InitTowerScene(const int towerMode)
 	float fROIRadius;
 	float zMax, zMin, minCamZ;
 	Point2f centerPoint;
+	if (towerMode == 0)
+		return;
 	if (!ComputeTowerCylinder(centerPoint, fRadius, fROIRadius, zMin, zMax, minCamZ, towerMode))
 		return;
 
@@ -2162,16 +2792,19 @@ void Scene::InitTowerScene(const int towerMode)
 		break;
 	case 3: // select neighbors
 		pointcloud.Swap(towerPC);
-		SelectNeighborViews(OPTDENSE::nMinViews, OPTDENSE::nMinViewsTrustPoint>1?OPTDENSE::nMinViewsTrustPoint:2, FD2R(OPTDENSE::fOptimAngle), OPTDENSE::nPointInsideROI);
+		SelectNeighborViews(OPTDENSE::nMinViews, OPTDENSE::nMinViewsTrustPoint>1?OPTDENSE::nMinViewsTrustPoint:2, FD2R(OPTDENSE::fOptimAngle), OPTDENSE::fWeightPointInsideROI);
 		pointcloud.Swap(towerPC);
 		VERBOSE("Scene identified as tower-like; only select view neighbors from detected tower point-cloud");
 		break;
 	case 4: // select neighbors and append tower points
 		pointcloud.Swap(towerPC);
-		SelectNeighborViews(OPTDENSE::nMinViews, OPTDENSE::nMinViewsTrustPoint>1?OPTDENSE::nMinViewsTrustPoint:2, FD2R(OPTDENSE::fOptimAngle), OPTDENSE::nPointInsideROI);
+		SelectNeighborViews(OPTDENSE::nMinViews, OPTDENSE::nMinViewsTrustPoint>1?OPTDENSE::nMinViewsTrustPoint:2, FD2R(OPTDENSE::fOptimAngle), OPTDENSE::fWeightPointInsideROI);
 		pointcloud.Swap(towerPC);
 		AppendPointCloud(towerPC);
 		VERBOSE("Scene identified as tower-like; select view neighbors from detected tower point-cloud and next append it to existing point-cloud");
 		break;
 	}
 } // InitTowerScene
+/*----------------------------------------------------------------*/
+
+#pragma pop_macro("VERBOSE")

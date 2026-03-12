@@ -336,7 +336,7 @@ bool Export3DProjections(Scene& scene, const String& inputFileName) {
 int main(int argc, LPCTSTR* argv)
 {
 	#ifdef _DEBUGINFO
-	// set _crtBreakAlloc index to stop in <dbgheap.c> at allocation
+	// set _crtBreakAlloc index or use _CrtSetBreakAlloc() to stop in <dbgheap.c> at allocation
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);// | _CRTDBG_CHECK_ALWAYS_DF);
 	#endif
 
@@ -452,16 +452,13 @@ int main(int argc, LPCTSTR* argv)
 				scene.pointcloud.pointWeights.Release();
 			if (!scene.ReconstructMesh(OPT::fDistInsert, OPT::bUseFreeSpaceSupport, OPT::bUseOnlyROI, 4, OPT::fThicknessFactor, OPT::fQualityFactor))
 				return EXIT_FAILURE;
-			VERBOSE("Mesh reconstruction completed: %u vertices, %u faces (%s)", scene.mesh.vertices.GetSize(), scene.mesh.faces.GetSize(), TD_TIMER_GET_FMT().c_str());
+			VERBOSE("Mesh reconstruction completed: %u vertices, %u faces (%s)", scene.mesh.vertices.size(), scene.mesh.faces.size(), TD_TIMER_GET_FMT().c_str());
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			if (VERBOSITY_LEVEL > 2) {
 				// dump raw mesh
 				scene.mesh.Save(baseFileName+_T("_raw")+OPT::strExportType);
 			}
 			#endif
-		} else if (!OPT::strMeshFileName.empty()) {
-			// load existing mesh to clean
-			scene.mesh.Load(MAKE_PATH_SAFE(OPT::strMeshFileName));
 		}
 
 		// clean the mesh

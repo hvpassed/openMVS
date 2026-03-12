@@ -76,7 +76,8 @@ public:
 
 	void EstimateNormalMaps();
 
-	bool FilterDepthMap(DepthData& depthData, const IIndexArr& idxNeighbors, bool bAdjust=true);
+	bool AdjustConfidenceFast(DepthData& depthData, const IIndexArr& idxNeighbors);
+	bool AdjustConfidence(DepthData& depthDataRef, const IIndexArr& idxNeighbors);
 	void MergeDepthMaps(PointCloud& pointcloud, bool bEstimateColor, bool bEstimateNormal);
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, bool bEstimateNormal);
 	void DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, bool bEstimateNormal);
@@ -119,9 +120,10 @@ struct MVS_API DenseDepthMapData {
 	CAutoPtr<Util::Progress> progress;
 	int nEstimationGeometricIter;
 	int nFusionMode;
+	float fSampleMeshNeighbors;
 	STEREO::SemiGlobalMatcher sgm;
 
-	DenseDepthMapData(Scene& _scene, int _nFusionMode=0);
+	DenseDepthMapData(Scene& _scene, int _nFusionMode=0, float _fSampleMeshNeighbors=0);
 	~DenseDepthMapData();
 
 	void SignalCompleteDepthmapFilter();

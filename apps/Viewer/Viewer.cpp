@@ -1,7 +1,7 @@
 /*
  * Viewer.cpp
  *
- * Copyright (c) 2014-2015 SEACAVE
+ * Copyright (c) 2014-2025 SEACAVE
  *
  * Author(s):
  *
@@ -30,9 +30,8 @@
  */
 
 #include "Common.h"
-#include <boost/program_options.hpp>
-
 #include "Scene.h"
+#include <boost/program_options.hpp>
 
 using namespace VIEWER;
 
@@ -76,7 +75,9 @@ bool Application::Initialize(size_t argc, LPCTSTR* argv)
 {
 	// initialize log and console
 	OPEN_LOG();
+	#ifndef _RELEASE
 	OPEN_LOGCONSOLE();
+	#endif
 
 	// group of options allowed only on command line
 	boost::program_options::options_description generic("Generic options");
@@ -151,27 +152,7 @@ bool Application::Initialize(size_t argc, LPCTSTR* argv)
 		boost::program_options::options_description visible("Available options");
 		visible.add(generic).add(config);
 		GET_LOG() << _T("\n"
-			"Visualize any know point-cloud/mesh formats or MVS projects. Supply files through command line or Drag&Drop.\n"
-			"Keys:\n"
-			"\tE: export scene\n"
-			"\tR: reset scene\n"
-			"\tB: render bounds\n"
-			"\tB + Shift: togle bounds\n"
-			"\tC: render cameras\n"
-			"\tC + Shift: render camera trajectory\n"
-			"\tC + Ctrl: center scene\n"
-			"\tLeft/Right: select next camera to view the scene\n"
-			"\tS: save scene\n"
-			"\tS + Shift: rescale images and save scene\n"
-			"\tT: render mesh texture\n"
-			"\tW: render wire-frame mesh\n"
-			"\tV: render view rays to the selected point\n"
-			"\tV + Shift: render points seen by the current view\n"
-			"\tUp/Down: adjust point size\n"
-			"\tUp/Down + Shift: adjust minimum number of views accepted when displaying a point or line\n"
-			"\t+/-: adjust camera thumbnail transparency\n"
-			"\t+/- + Shift: adjust camera cones' length\n"
-			"\n")
+			"Visualize any know point-cloud/mesh formats or MVS projects. Supply files through command line or Drag&Drop.\n")
 			<< visible;
 	}
 	if (!OPT::strExportType.empty())
@@ -201,7 +182,7 @@ void Application::Finalize()
 int main(int argc, LPCTSTR* argv)
 {
 	#ifdef _DEBUGINFO
-	// set _crtBreakAlloc index to stop in <dbgheap.c> at allocation
+	// set _crtBreakAlloc index or use _CrtSetBreakAlloc() to stop in <dbgheap.c> at allocation
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);// | _CRTDBG_CHECK_ALWAYS_DF);
 	#endif
 
@@ -211,16 +192,22 @@ int main(int argc, LPCTSTR* argv)
 
 	// create viewer
 	Scene viewer;
-	if (!viewer.Init(cv::Size(1280, 720), APPNAME,
-			OPT::strInputFileName.empty() ? NULL : MAKE_PATH_SAFE(OPT::strInputFileName).c_str(),
-			OPT::strGeometryFileName.empty() ? NULL : MAKE_PATH_SAFE(OPT::strGeometryFileName).c_str()))
+	if (!viewer.Initialize(cv::Size(1280, 720), APPNAME,
+			OPT::strInputFileName.empty() ? OPT::strInputFileName : MAKE_PATH_SAFE(OPT::strInputFileName),
+			OPT::strGeometryFileName.empty() ? OPT::strGeometryFileName : MAKE_PATH_SAFE(OPT::strGeometryFileName)))
 		return EXIT_FAILURE;
 	if (viewer.IsOpen() && !OPT::strOutputFileName.empty()) {
 		// export the scene
 		viewer.Export(MAKE_PATH_SAFE(OPT::strOutputFileName), OPT::strExportType.empty()?LPCTSTR(NULL):OPT::strExportType.c_str());
 	}
 	// enter viewer loop
-	viewer.Loop();
+	viewer.Run();
 	return EXIT_SUCCESS;
 }
+#ifdef _WIN32
+// bridge WinMain -> main()
+int APIENTRY WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+	return main(__argc, const_cast<LPCTSTR*>(__argv));
+}
+#endif
 /*----------------------------------------------------------------*/

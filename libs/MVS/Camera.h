@@ -142,32 +142,12 @@ public:
 	}
 
 	// return scaled K (assuming standard K format)
-	template<typename TYPE>
-	static inline TMatrix<TYPE,3,3> ScaleK(const TMatrix<TYPE,3,3>& K, TYPE s) {
-		return TMatrix<TYPE,3,3>(
-			K(0,0)*s, K(0,1)*s, (K(0,2)+TYPE(0.5))*s-TYPE(0.5),
-			TYPE(0),  K(1,1)*s, (K(1,2)+TYPE(0.5))*s-TYPE(0.5),
-			TYPE(0), TYPE(0), TYPE(1)
-		);
-	}
 	inline KMatrix GetScaledK(REAL s) const {
 		return ScaleK(K, s);
 	}
 	// same as above, but for different scale on x and y;
 	// in order to preserve the aspect ratio of the original size, scale both focal lengths by
 	// the smaller of the scale factors, resulting in adding pixels in the dimension that's growing;
-	template<typename TYPE>
-	static inline TMatrix<TYPE,3,3> ScaleK(const TMatrix<TYPE,3,3>& K, const cv::Size& size, const cv::Size& newSize, bool keepAspect=false) {
-		ASSERT(size.area() && newSize.area());
-		cv::Point_<TYPE> s(cv::Point_<TYPE>(newSize) / cv::Point_<TYPE>(size));
-		if (keepAspect)
-			s.x = s.y = MINF(s.x, s.y);
-		return TMatrix<TYPE,3,3>(
-			K(0,0)*s.x, K(0,1)*s.x, (K(0,2)+TYPE(0.5))*s.x-TYPE(0.5),
-			TYPE(0),    K(1,1)*s.y, (K(1,2)+TYPE(0.5))*s.y-TYPE(0.5),
-			TYPE(0),    TYPE(0),    TYPE(1)
-		);
-	}
 	inline KMatrix GetScaledK(const cv::Size& size, const cv::Size& newSize, bool keepAspect=false) const {
 		return ScaleK(K, size, newSize, keepAspect);
 	}
@@ -187,7 +167,8 @@ public:
 		return InvK(K);
 	}
 
-	// returns full K and the inverse of K (assuming standard K format)
+	// return full K and the inverse of K (assuming standard K format);
+	// the given resolution must be of the same aspect ratio as the normalized camera
 	template<typename TYPE>
 	inline TMatrix<TYPE,3,3> GetK(uint32_t width, uint32_t height) const {
 		ASSERT(width>0 && height>0);
@@ -445,38 +426,40 @@ public:
 	}
 	template <typename TYPE>
 	inline TYPE GetFootprintImage(const TPoint3<TYPE>& X) const {
-		#if 0
-		const TYPE fSphereRadius(1);
-		const TPoint3<TYPE> camX(TransformPointW2C(X));
-		return norm(TransformPointC2I(TPoint3<TYPE>(camX.x+fSphereRadius,camX.y,camX.z))-TransformPointC2I(camX));
-		#else
-		return static_cast<TYPE>(GetFocalLength() / PointDepth(X));
-		#endif
+		return GetFootprintImage(PointDepth(X));
 	}
 	// compute the surface the projected pixel covers at the given depth
 	template <typename TYPE>
-	inline TYPE GetFootprintWorldSq(const TPoint2<TYPE>& x, TYPE depth) const {
-		#if 0
-		return SQUARE(GetFocalLength());
-		#else
-		// improved version of the above
-		return SQUARE(depth) / (SQUARE(GetFocalLength()) + normSq(TransformPointI2V(x)));
-		#endif
-	}
-	template <typename TYPE>
-	inline TYPE GetFootprintWorld(const TPoint2<TYPE>& x, TYPE depth) const {
-		return depth / SQRT(SQUARE(GetFocalLength()) + normSq(TransformPointI2V(x)));
+	inline TYPE GetFootprintWorld(TYPE depth) const {
+		return static_cast<TYPE>(depth / GetFocalLength());
 	}
 	// same as above, but the 3D point is given
 	template <typename TYPE>
-	inline TYPE GetFootprintWorldSq(const TPoint3<TYPE>& X) const {
-		const TPoint3<TYPE> camX(TransformPointW2C(X));
-		return GetFootprintWorldSq(TPoint2<TYPE>(camX.x/camX.z,camX.y/camX.z), camX.z);
-	}
-	template <typename TYPE>
 	inline TYPE GetFootprintWorld(const TPoint3<TYPE>& X) const {
-		const TPoint3<TYPE> camX(TransformPointW2C(X));
-		return GetFootprintWorld(TPoint2<TYPE>(camX.x/camX.z,camX.y/camX.z), camX.z);
+		return GetFootprintWorld(PointDepth(X));
+	}
+
+	// create the 4 image points corresponding to the image corners
+	Point2Arr GetImageCorners(const cv::Size& size) const {
+		const int maxX = size.width - 1;
+		const int maxY = size.height - 1;
+		return Point2Arr{
+			Point2(0, 0),
+			Point2(0, maxY),
+			Point2(maxX, maxY),
+			Point2(maxX, 0)
+		};
+	}
+	// compute the normalized rays in camera space corresponding to the image corners
+	Point3Arr GetCameraCornerRays(const cv::Size& size, bool bNormalize=true) const {
+		const Point2Arr corners(GetImageCorners(size));
+		Point3Arr result(4);
+		for (int i = 0; i < 4; ++i) {
+			result[i] = RayPoint(corners[i]);
+			if (bNormalize)
+				normalize(result[i]);
+		}
+		return result;
 	}
 
 	#ifdef _USE_BOOST
@@ -496,10 +479,6 @@ public:
 typedef CLISTDEF0IDX(Camera,uint32_t) CameraArr;
 /*----------------------------------------------------------------*/
 
-MVS_API void DecomposeProjectionMatrix(const PMatrix& P, KMatrix& K, RMatrix& R, CMatrix& C);
-MVS_API void DecomposeProjectionMatrix(const PMatrix& P, RMatrix& R, CMatrix& C);
-MVS_API void AssembleProjectionMatrix(const KMatrix& K, const RMatrix& R, const CMatrix& C, PMatrix& P);
-MVS_API void AssembleProjectionMatrix(const RMatrix& R, const CMatrix& C, PMatrix& P);
 MVS_API Point3 ComputeCamerasFocusPoint(const CameraArr& cameras, const Point3* pInitialFocus=NULL);
 /*----------------------------------------------------------------*/
 

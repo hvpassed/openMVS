@@ -19,7 +19,6 @@
 // CUDA toolkit
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
-#include <cuda_texture_types.h>
 #include <curand_kernel.h>
 #include <vector_types.h>
 
@@ -151,12 +150,10 @@ public:
 	inline MemDevice(const cList<TYPE,ARG_TYPE,useConstruct,grow,IDX_TYPE>& param) : pData(0) { reportCudaError(Reset(param)); }
 	inline ~MemDevice() { Release(); }
 
-	MemDevice(MemDevice& rhs) : pData(rhs.pData) { rhs.pData = 0; }
+	MemDevice(MemDevice&& rhs) : pData(rhs.pData) { rhs.pData = 0; }
 	MemDevice& operator=(MemDevice& rhs) { pData = rhs.pData; rhs.pData = 0; return *this; }
 
-	inline bool IsValid() const {
-		return (pData != 0);
-	}
+	inline bool IsValid() const { return (pData != 0); }
 	void Release();
 	CUresult Reset(size_t size);
 	CUresult Reset(const void* pDataHost, size_t size);
@@ -472,7 +469,7 @@ public:
 	inline TArrayRT(unsigned width, unsigned height, unsigned depth=0, unsigned flags=0) : hArray(NULL) { reportCudaError(Reset(width, height, depth, flags)); }
 	inline ~TArrayRT() { Release(); }
 
-	TArrayRT(TArrayRT& rhs) : hArray(rhs.hArray) { rhs.hArray = NULL; }
+	TArrayRT(TArrayRT&& rhs) : hArray(rhs.hArray) { rhs.hArray = NULL; }
 	TArrayRT& operator=(TArrayRT& rhs) {
 		hArray = rhs.hArray;
 		rhs.hArray = NULL;

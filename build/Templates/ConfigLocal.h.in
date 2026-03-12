@@ -33,14 +33,14 @@
 // JPEG codec
 #cmakedefine _USE_JPG
 
+// JPEG-XL codec
+#cmakedefine _USE_JXL
+
 // PNG codec
 #cmakedefine _USE_PNG
 
 // TIFF codec
 #cmakedefine _USE_TIFF
-
-// OpenGL support
-#cmakedefine _USE_OPENGL
 
 // OpenCL support
 #cmakedefine _USE_OPENCL

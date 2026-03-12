@@ -38,8 +38,8 @@
 #include <CGAL/Triangulation_cell_base_with_info_3.h>
 #include <CGAL/Spatial_sort_traits_adapter_3.h>
 #include <CGAL/AABB_tree.h>
-#include <CGAL/AABB_traits.h>
-#include <CGAL/AABB_triangle_primitive.h>
+#include <CGAL/AABB_traits_3.h>
+#include <CGAL/AABB_triangle_primitive_3.h>
 #include <CGAL/Polyhedron_3.h>
 
 using namespace MVS;
@@ -59,8 +59,14 @@ using namespace MVS;
 // (faster, but not clear license policy)
 #define DELAUNAY_MAXFLOW_IBFS
 
+#pragma push_macro("VERBOSE")
+#undef VERBOSE
+#define VERBOSE(...) LOG(lt, __VA_ARGS__)
+
 
 // S T R U C T S ///////////////////////////////////////////////////
+
+DEFINE_LOG_NAME(lt, _T("ScnRecnt"));
 
 #ifdef DELAUNAY_MAXFLOW_IBFS
 #include "../Math/IBFS/IBFS.h"
@@ -192,7 +198,7 @@ protected:
 
 // S T R U C T S ///////////////////////////////////////////////////
 
-// construct the mesh out of the dense point cloud using Delaunay tetrahedralization & graph-cut method
+// construct the mesh out of the dense point-cloud using Delaunay tetrahedralization & graph-cut method
 // see "Exploiting Visibility Information in Surface Reconstruction to Preserve Weakly Supported Surfaces", Jancosek and Pajdla, 2015
 namespace DELAUNAY {
 typedef CGAL::Exact_predicates_inexact_constructions_kernel kernel_t;
@@ -285,9 +291,9 @@ vert_info_t::~vert_info_t() {
 }
 void vert_info_t::AllocateInfo() {
 	ASSERT(!views.IsEmpty());
-	viewsInfo = new view_info_t[views.GetSize()];
+	viewsInfo = new view_info_t[views.size()];
 	#ifndef _RELEASE
-	memset(viewsInfo, 0, sizeof(view_info_t)*views.GetSize());
+	memset(reinterpret_cast<void*>(viewsInfo), 0, sizeof(view_info_t)*views.size());
 	#endif
 }
 #endif
@@ -1160,3 +1166,5 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, bool bU
 	return true;
 }
 /*----------------------------------------------------------------*/
+
+#pragma pop_macro("VERBOSE")

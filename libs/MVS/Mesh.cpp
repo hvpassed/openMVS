@@ -31,21 +31,6 @@
 
 #include "Common.h"
 #include "Mesh.h"
-// fix non-manifold vertices
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/filtered_graph.hpp>
-#include <boost/graph/connected_components.hpp>
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable: 4244 4267 4305)
-#ifdef _SUPPORT_CPP17
-namespace std {
-template <typename ArgumentType, typename ResultType>
-struct unary_function {
-};
-} // namespace std
-#endif // _SUPPORT_CPP17
-#endif // _MSC_VER
 // VCG: mesh reconstruction post-processing
 #define _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
 #include <vcg/complex/complex.h>
@@ -98,8 +83,14 @@ using namespace MVS;
 #include <unsupported/Eigen/BVH>
 #endif
 
+#pragma push_macro("VERBOSE")
+#undef VERBOSE
+#define VERBOSE(...) LOG(lt, __VA_ARGS__)
+
 
 // S T R U C T S ///////////////////////////////////////////////////
+
+DEFINE_LOG_NAME(lt, _T("Mesh    "));
 
 // free all memory
 void Mesh::Release()
@@ -204,6 +195,47 @@ Mesh::Box Mesh::GetAABB(const Box& bound) const
 		if (bound.Intersects(X))
 			box.InsertFull(X);
 	return box;
+}
+// compute the axis-aligned bounding-box of the mesh
+// considering only vertices within the given percentile range per axis
+Mesh::Box Mesh::GetAABB(float minPercentile, float maxPercentile) const
+{
+	// get percentile bounds for each axis
+	const Box percentileBounds(GetPercentileAABB(minPercentile, maxPercentile));
+	// compute AABB from vertices within percentile bounds
+	return GetAABB(percentileBounds);
+}
+// compute the percentile axis-aligned bounding-box of the mesh
+// considering only vertices within the given percentile range per axis
+Mesh::Box Mesh::GetPercentileAABB(float minPercentile, float maxPercentile) const
+{
+	ASSERT(minPercentile >= 0.f && minPercentile <= 1.f);
+	ASSERT(maxPercentile >= 0.f && maxPercentile <= 1.f);
+	ASSERT(minPercentile < maxPercentile);
+	// collect points per axis
+	typedef CLISTDEF0IDX(Type,VIndex) Scalars;
+	Scalars x, y, z;
+	x.reserve(vertices.size());
+	y.reserve(vertices.size());
+	z.reserve(vertices.size());
+	for (const Vertex& X: vertices) {
+		x.push_back(X.x);
+		y.push_back(X.y);
+		z.push_back(X.z);
+	}
+	if (x.empty())
+		return Box(true);
+	// compute percentile indices
+	x.Sort();
+	y.Sort();
+	z.Sort();
+	const float numPoints(x.size() - 1);
+	const VIndex idxMin(MAXF(VIndex(0), ROUND2INT<VIndex>(minPercentile * numPoints)));
+	const VIndex idxMax(MINF(static_cast<VIndex>(numPoints), ROUND2INT<VIndex>(maxPercentile * numPoints)));
+	// return percentile bounds for each axis
+	return Box(
+		Box::POINT(x[idxMin], y[idxMin], z[idxMin]),
+		Box::POINT(x[idxMax], y[idxMax], z[idxMax]));
 }
 
 // compute the center of the point-cloud as the median
@@ -479,7 +511,7 @@ void Mesh::GetFaceFaces(FIndex f, FaceIdxArr& afaces) const
 	}
 }
 
-void Mesh::GetEdgeVertices(FIndex f0, FIndex f1, uint32_t* vs0, uint32_t* vs1) const
+bool Mesh::GetEdgeVertices(FIndex f0, FIndex f1, uint32_t* vs0, uint32_t* vs1) const
 {
 	const Face& face0 = faces[f0];
 	const Face& face1 = faces[f1];
@@ -488,9 +520,25 @@ void Mesh::GetEdgeVertices(FIndex f0, FIndex f1, uint32_t* vs0, uint32_t* vs1) c
 		if ((vs1[i] = FindVertex(face1, face0[v])) != NO_ID) {
 			vs0[i] = v;
 			if (++i == 2)
-				return;
+				return true;
 		}
 	}
+	return false;
+}
+
+bool Mesh::GetEdgeVertices(FIndex f0, FIndex f1, VIndex* vs) const
+{
+	const Face& face0 = faces[f0];
+	const Face& face1 = faces[f1];
+	int i(0);
+	for (int v=0; v<3; ++v) {
+		if (FindVertex(face1, face0[v]) != NO_ID) {
+			vs[i] = face0[v];
+			if (++i == 2)
+				return true;
+		}
+	}
+	return false;
 }
 
 // get the edge orientation in the given face:
@@ -1214,7 +1262,8 @@ bool Mesh::Load(const String& fileName)
 		ret = LoadPLY(fileName);
 	if (!ret)
 		return false;
-	DEBUG_EXTRA("Mesh loaded: %u vertices, %u faces (%s)", vertices.size(), faces.size(), TD_TIMER_GET_FMT().c_str());
+	DEBUG_EXTRA("Mesh '%s' loaded: %u vertices, %u faces (%s)",
+		Util::getFileNameExt(fileName).c_str(), vertices.size(), faces.size(), TD_TIMER_GET_FMT().c_str());
 	return true;
 }
 // import the mesh as a PLY file
@@ -1243,7 +1292,7 @@ bool Mesh::LoadPLY(const String& fileName)
 	if (vertices.empty() && faces.empty())
 		return true;
 	if (vertices.empty() || faces.empty()) {
-		DEBUG_EXTRA("error: invalid mesh file");
+		Release();
 		return false;
 	}
 
@@ -1400,6 +1449,20 @@ bool Mesh::LoadGLTF(const String& fileName, bool bBinary)
 			DEBUG("warning: %s", warn.c_str());
 	}
 
+	// check if the model contains any mesh
+	bool bHasMesh = false;
+	for (const tinygltf::Mesh& gltfMesh : gltfModel.meshes) {
+		for (const tinygltf::Primitive& gltfPrimitive : gltfMesh.primitives) {
+			if (gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES) {
+				bHasMesh = true;
+				break;
+			}
+		}
+		if (bHasMesh) break;
+	}
+	if (!bHasMesh)
+		return false;
+
 	// parse model
 	for (const tinygltf::Mesh& gltfMesh : gltfModel.meshes) {
 		for (const tinygltf::Primitive& gltfPrimitive : gltfMesh.primitives) {
@@ -1471,7 +1534,8 @@ bool Mesh::Save(const String& fileName, const cList<String>& comments, bool bBin
 		ret = SavePLY(ext != _T(".ply") ? String(fileName+_T(".ply")) : fileName, comments, bBinary);
 	if (!ret)
 		return false;
-	DEBUG_EXTRA("Mesh saved: %u vertices, %u faces (%s)", vertices.size(), faces.size(), TD_TIMER_GET_FMT().c_str());
+	DEBUG_EXTRA("Mesh '%s' saved: %u vertices, %u faces (%s)",
+		Util::getFileNameExt(fileName).c_str(), vertices.size(), faces.size(), TD_TIMER_GET_FMT().c_str());
 	return true;
 }
 // export the mesh as a PLY file
@@ -1783,9 +1847,9 @@ bool Mesh::SaveGLTF(const String& fileName, bool bBinary) const
 			image->uri = Util::isFullPath(filename->c_str()) ?
 				Util::getRelativePath(*basepath, *filename) : String(*filename);
 			String basePath(*basepath);
-			return cv::imwrite(
-				Util::ensureFolderSlash(basePath) + image->uri,
-				cv::Mat(image->height, image->width, CV_8UC3, image->image.data()));
+			return SaveImage(
+				cv::Mat(image->height, image->width, CV_8UC3, image->image.data()),
+				Util::ensureFolderSlash(basePath) + image->uri);
 		}
 	};
 	tinygltf::TinyGLTF gltf;
@@ -2209,7 +2273,7 @@ static bool CanCollapseEdge(Vertex::Halfedge_handle v0v1)
 			t3 = REPLACE_POINT(t3, p0, p1, p_middle);
 			a2 = CGAL::cross_product(t2-t1, t3-t2);
 
-			if ((v_norm(a2) != 0) && (v_angle(a1, a2) > PI/2))
+			if ((v_norm(a2) != 0) && (v_angle(a1, a2) > HALF_PI))
 				return false;
 		}
 	}
@@ -2315,7 +2379,7 @@ static void SplitEdge(Polyhedron& p, Vertex::Halfedge_handle h, int mode=1)
 		const double ratio(0.5);
 		p_midddle = p1 + (p2-p1) * ratio;
 	} else { // projection of the 3rd vertex
-		const double ratio(v_norm(p3-p2) * cos(OppositeAngle(h->next())) / v_norm(p1-p2));
+		const double ratio(v_norm(p3-p2) * COS(OppositeAngle(h->next())) / v_norm(p1-p2));
 		p_midddle = p2 + (p1-p2) * ratio;
 	}
 
@@ -2453,16 +2517,16 @@ static int ImproveVertexValence(Polyhedron& p, int valence_mode=2)
 
 static void UpdateMeshData(Polyhedron& p);
 
-// Description: 
+// Description:
 //  It iterates through all the mesh vertices and it tries to fix degenerate triangles.
 //  There are conditions that check for large and small angles.
 // Parameters:
-//  - degenerateAngleDeg 
+//  - degenerateAngleDeg
 //     - for large angles: if an angle is bigger than degenerateAngleDeg.
 //     - a good values to use is typically 170
-//  - collapseRatio 
+//  - collapseRatio
 //     - for small angles: given the corresponding edges (a,b,c) in all permutations, if (a/b < collapseRatio) & (a/c < collapseRatio)
-//     - a good value to use is 0.1 
+//     - a good value to use is 0.1
 static int FixDegeneracy(Polyhedron& p, double collapseRatio, double degenerateAngleDeg)
 {
 	DEBUG_LEVEL(3, "Fix degeneracy: %g collapse-ratio, %g degenerate-angle", collapseRatio, degenerateAngleDeg);
@@ -2672,7 +2736,7 @@ static void Smooth(Polyhedron& p, double delta, int mode=0)
 }
 
 
-// Description: 
+// Description:
 // - The goal of this method is to ensure that all the edges of the mesh are within the interval [epsilonMin,epsilonMax].
 //   In order to do so, edge collapses and edge split operations are performed.
 // - The method also attempts to fix degeneracies by invoking FixDegeneracy(collapseRatio,degenerate_angle_deg) and performs some local smoothing, based on the operating mode.
@@ -2683,7 +2747,7 @@ static void Smooth(Polyhedron& p, double delta, int mode=0)
 //          1 - fixDegeneracy=Yes smoothing=Yes; (default)
 //         10 - fixDegeneracy=Yes smoothing=No;
 // - max_iter (default=30) - maximum number of iterations to be performed; since there is no guarantee that one operations (such as a collapse, for example)
-//   will not in turn generate new degeneracies, operations are being performed on the mesh in an iterative fashion. 
+//   will not in turn generate new degeneracies, operations are being performed on the mesh in an iterative fashion.
 static void EnsureEdgeSize(Polyhedron& p, double epsilonMin, double epsilonMax, double collapseRatio, double degenerate_angle_deg, int mode, int max_iters, int comp_size_threshold)
 {
 	if (mode>0)
@@ -2778,7 +2842,7 @@ static void EnsureEdgeSize(Polyhedron& p, double epsilonMin, double epsilonMax, 
 		ComputeStatsEdge(p, edge);
 		VERBOSE("Edge size in [%g, %g] (requested in [%g, %g]): %d ops, %d iters", edge.min, edge.max, epsilonMin, epsilonMax, total_no_ops, iters);
 	}
-	#endif	
+	#endif
 }
 
 static void ComputeVertexNormals(Polyhedron& p)
@@ -2811,7 +2875,7 @@ static std::vector< std::pair<Vertex*, int> > GetRingNeighbourhood(Vertex& v, in
 	std::queue<Vertex*> elems;
 	std::vector< std::pair<Vertex*, int> > result;
 
-	// add base level	
+	// add base level
 	elems.push(&v);
 	neigh_map[&v]=0;
 
@@ -2880,7 +2944,7 @@ static void ComputeVertexLaplacian(Vertex& v)
 
 		float theta_1((float)v_angle(e, e_next));
 		float theta_2((float)v_angle(e, e_prev));
-		float w((tan(theta_1/2)+tan(theta_2/2))/v_norm(e));
+		float w((TAN(theta_1/2)+TAN(theta_2/2))/v_norm(e));
 
 		w_total += w;
 		result_laplacian = result_laplacian + w*e;
@@ -2922,7 +2986,7 @@ static void UpdateMeshData(Polyhedron& p)
 	// compute vertex normal
 	ComputeVertexNormals(p);
 	#if ROBUST_NORMALS>0
-	// compute robust vertex normal		
+	// compute robust vertex normal
 	for (Vertex_iterator vi=p.vertices_begin(); vi!=p.vertices_end(); vi++)
 		ComputeVertexRobustNormal(*vi, ROBUST_NORMALS);
 	#endif
@@ -2941,7 +3005,7 @@ static void UpdateMeshData(Polyhedron& p)
 		ComputeVertexLaplacianDeriv(*vi);
 	}
 
-	// set border edges	
+	// set border edges
 	for (Halfedge_iterator hi=p.border_halfedges_begin(); hi!=p.halfedges_end(); hi++)
 		hi->vertex()->setBorder();
 }
@@ -2961,7 +3025,7 @@ public:
 		typedef typename HDS::Vertex::Point Point;
 		CGAL::Polyhedron_incremental_builder_3<HDS> B(hds, false);
 		B.begin_surface(vertices.size(), faces.size());
-		// add the vertices		
+		// add the vertices
 		FOREACH(i, vertices) {
 			const Mesh::Vertex& v = vertices[i];
 			B.add_vertex(Point(v.x, v.y, v.z));
@@ -3678,6 +3742,7 @@ Mesh::FIndex Mesh::RemoveDegenerateFaces(unsigned maxIterations, Type thArea) {
 }
 /*----------------------------------------------------------------*/
 
+
 // crop mesh such that none of its faces is touching or outside the given bounding-box
 void Mesh::RemoveFacesOutside(const OBB3f& obb) {
 	ASSERT(obb.IsValid());
@@ -3703,10 +3768,15 @@ void Mesh::RemoveFaces(FaceIdxArr& facesRemove, bool bUpdateLists)
 			if (idxLast == idxF)
 				continue;
 			faces.RemoveAt(idxF);
+			if (!faceNormals.empty())
+				faceNormals.RemoveAt(idxF);
 			if (!faceTexcoords.empty())
 				faceTexcoords.RemoveAt(idxF * 3, 3);
+			if (!faceTexindices.empty())
+				faceTexindices.RemoveAt(idxF);
 			idxLast = idxF;
 		}
+		vertexFaces.Release();
 	} else {
 		ASSERT(vertices.size() == vertexFaces.size());
 		RFOREACHPTR(pIdxF, facesRemove) {
@@ -3737,8 +3807,12 @@ void Mesh::RemoveFaces(FaceIdxArr& facesRemove, bool bUpdateLists)
 				}
 			}
 			faces.RemoveAt(idxF);
+			if (!faceNormals.empty())
+				faceNormals.RemoveAt(idxF);
 			if (!faceTexcoords.empty())
 				faceTexcoords.RemoveAt(idxF * 3, 3);
+			if (!faceTexindices.empty())
+				faceTexindices.RemoveAt(idxF);
 			idxLast = idxF;
 		}
 	}
@@ -3760,8 +3834,8 @@ void Mesh::RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists)
 			if (idxV < idxVM) {
 				// update all faces of the moved vertex
 				const FaceIdxArr& vf(vertexFaces[idxVM]);
-				FOREACHPTR(pIdxF, vf)
-					GetVertex(faces[*pIdxF], idxVM) = idxV;
+				for (const FIndex idxF : vf)
+					GetVertex(faces[idxF], idxVM) = idxV;
 			}
 			vertexFaces.RemoveAt(idxV);
 			vertices.RemoveAt(idxV);
@@ -3778,8 +3852,8 @@ void Mesh::RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists)
 		if (idxV < idxVM) {
 			// update all faces of the moved vertex
 			const FaceIdxArr& vf(vertexFaces[idxVM]);
-			FOREACHPTR(pIdxF, vf)
-				GetVertex(faces[*pIdxF], idxVM) = idxV;
+			for (const FIndex idxF : vf)
+				GetVertex(faces[idxF], idxVM) = idxV;
 		}
 		if (!vertexFaces.empty()) {
 			facesRemove.Join(vertexFaces[idxV]);
@@ -3930,13 +4004,13 @@ Planef Mesh::EstimateGroundPlane(const ImageArr& images, float sampleMesh, float
 	ASSERT(!IsEmpty());
 	PointCloud pointcloud;
 	if (sampleMesh != 0) {
-		// create the point cloud by sampling the mesh
+		// create the point-cloud by sampling the mesh
 		if (sampleMesh > 0)
 			SamplePoints(sampleMesh, 0, pointcloud);
 		else
 			SamplePoints(ROUND2INT<unsigned>(-sampleMesh), pointcloud);
 	} else {
-		// create the point cloud containing all vertices
+		// create the point-cloud containing all vertices
 		for (const Vertex& X: vertices)
 			pointcloud.points.emplace_back(X);
 	}
@@ -4361,20 +4435,26 @@ Mesh Mesh::SubMesh(const FaceIdxArr& chunk) const
 } // SubMesh
 /*----------------------------------------------------------------*/
 
-// extract one sub-mesh for each texture, i.e. for each value of faceTexindices;
-std::vector<Mesh> Mesh::SplitMeshPerTextureBlob() const {
-
+// extract one sub-mesh for each texture, i.e. for each value of faceTexindices:
+//  - mapFaceSubsetIndices: if not null, for each face of the original mesh,
+//    contains the index of the face in the corresponding sub-mesh
+std::vector<Mesh> Mesh::SplitMeshPerTextureBlob(FaceIdxArr* mapFaceSubsetIndices) const {
 	ASSERT(HasTexture());
 	if (texturesDiffuse.size() == 1)
 		return {*this};
+	if (mapFaceSubsetIndices)
+		mapFaceSubsetIndices->resize(faces.size());
 	ASSERT(faceTexindices.size() == faces.size());
 	std::vector<Mesh> submeshes;
 	submeshes.reserve(texturesDiffuse.size());
 	FOREACH(texId, texturesDiffuse) {
 		FaceIdxArr chunk;
 		FOREACH(idxFace, faceTexindices) {
-			if (faceTexindices[idxFace] == texId)
+			if (faceTexindices[idxFace] == texId) {
+				if (mapFaceSubsetIndices)
+					(*mapFaceSubsetIndices)[idxFace] = chunk.size();
 				chunk.push_back(idxFace);
+			}
 		}
 		Mesh submesh = SubMesh(chunk);
 		submesh.texturesDiffuse.emplace_back(texturesDiffuse[texId]);
@@ -4408,16 +4488,16 @@ bool Mesh::TransferTexture(Mesh& mesh, const FaceIdxArr& faceSubsetIndices, unsi
 		}
 	}
 	Image8U mask(mesh.texturesDiffuse.back().size(), uint8_t(255));
-	const FIndex num_faces(faceSubsetIndices.empty() ? mesh.faces.size() : faceSubsetIndices.size());
+	const FIndex numFaces(faceSubsetIndices.empty() ? mesh.faces.size() : faceSubsetIndices.size());
 	if (vertices == mesh.vertices && faces == mesh.faces) {
 		// the two meshes are identical, only the texture coordinates are different;
 		// directly transfer the texture onto the new coordinates
 		#ifdef MESH_USE_OPENMP
 		#pragma omp parallel for schedule(dynamic)
-		for (int_t i=0; i<(int_t)num_faces; ++i) {
+		for (int_t i=0; i<(int_t)numFaces; ++i) {
 			const FIndex idx((FIndex)i);
 		#else
-		FOREACHRAW(idx, num_faces) {
+		FOREACHRAW(idx, numFaces) {
 		#endif
 			const FIndex idxFace(faceSubsetIndices.empty() ? idx : faceSubsetIndices[idx]);
 			struct RasterTriangle {
@@ -4523,10 +4603,10 @@ bool Mesh::TransferTexture(Mesh& mesh, const FaceIdxArr& faceSubsetIndices, unsi
 		#endif
 		#ifdef MESH_USE_OPENMP
 		#pragma omp parallel for schedule(dynamic)
-		for (int_t i=0; i<(int_t)num_faces; ++i) {
+		for (int_t i=0; i<(int_t)numFaces; ++i) {
 			const FIndex idx((FIndex)i);
 		#else
-		FOREACHRAW(idx, num_faces) {
+		FOREACHRAW(idx, numFaces) {
 		#endif
 			const FIndex idxFace(faceSubsetIndices.empty() ? idx : faceSubsetIndices[idx]);
 			struct RasterTriangle {
@@ -4608,6 +4688,27 @@ bool Mesh::TransferTexture(Mesh& mesh, const FaceIdxArr& faceSubsetIndices, unsi
 	}
 	return true;
 } // TransferTexture
+/*----------------------------------------------------------------*/
+
+// compute the memory size occupied by the mesh (in bytes)
+size_t MVS::Mesh::GetMemorySize() const {
+	if (IsEmpty())
+		return 0;
+	size_t nBytes = vertices.GetMemorySize();
+	nBytes += faces.GetMemorySize();
+	nBytes += vertexNormals.GetMemorySize();
+	nBytes += vertexVertices.GetMemorySize();
+	nBytes += vertexFaces.GetMemorySize();
+	nBytes += vertexBoundary.GetMemorySize();
+	nBytes += faceNormals.GetMemorySize();
+	nBytes += faceFaces.GetMemorySize();
+	nBytes += faceTexcoords.GetMemorySize();
+	nBytes += faceTexindices.GetMemorySize();
+	nBytes += texturesDiffuse.GetMemorySize();
+	for (const Image8U3& textureDiffuse: texturesDiffuse)
+		nBytes += textureDiffuse.memory_size();
+	return nBytes;
+}
 /*----------------------------------------------------------------*/
 
 
@@ -4811,3 +4912,5 @@ bool MVS::TestMeshProjectionMT(const Mesh& mesh, const Image& image) {
 }
 /*----------------------------------------------------------------*/
 #endif // _USE_OPENMP
+
+#pragma pop_macro("VERBOSE")

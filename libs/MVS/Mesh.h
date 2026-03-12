@@ -113,6 +113,14 @@ public:
 			octree.ResetItems();
 		}
 	};
+	struct FacesInserterAABB : FacesInserter {
+		Box aabb;
+		FacesInserterAABB(FaceIdxArr& _cameraFaces, const Box& _aabb)
+			: FacesInserter(_cameraFaces), aabb(_aabb) {}
+		inline bool Intersects(const typename Octree::POINT_TYPE& center, typename Octree::Type radius) const {
+			return aabb.Intersects(Box(center, radius));
+		}
+	};
 
 	struct FaceChunk {
 		FaceIdxArr faces;
@@ -161,6 +169,8 @@ public:
 
 	Box GetAABB() const;
 	Box GetAABB(const Box& bound) const;
+	Box GetAABB(float minPercentile, float maxPercentile) const;
+	Box GetPercentileAABB(float minPercentile, float maxPercentile) const;
 	Vertex GetCenter() const;
 
 	void ListIncidentVertices();
@@ -174,7 +184,8 @@ public:
 
 	void GetEdgeFaces(VIndex, VIndex, FaceIdxArr&) const;
 	void GetFaceFaces(FIndex, FaceIdxArr&) const;
-	void GetEdgeVertices(FIndex, FIndex, uint32_t vs0[2], uint32_t vs1[2]) const;
+	bool GetEdgeVertices(FIndex, FIndex, uint32_t vs0[2], uint32_t vs1[2]) const;
+	bool GetEdgeVertices(FIndex, FIndex, VIndex vs[2]) const;
 	bool GetEdgeOrientation(FIndex, VIndex, VIndex) const;
 	FIndex GetEdgeAdjacentFace(FIndex, VIndex, VIndex) const;
 	void GetAdjVertices(VIndex, VertexIdxArr&) const;
@@ -197,10 +208,10 @@ public:
 	void RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists=false);
 	VIndex RemoveDuplicatedVertices(VertexIdxArr* duplicatedVertices=NULL);
 	VIndex RemoveUnreferencedVertices(bool bUpdateLists=false);
-	std::vector<Mesh> SplitMeshPerTextureBlob() const;
+	std::vector<Mesh> SplitMeshPerTextureBlob(FaceIdxArr* mapFaceSubsetIndices = NULL) const;
 	void ConvertTexturePerVertex(Mesh&) const;
 
-	TexIndex GetFaceTextureIndex(FIndex idxF) const { return faceTexindices.empty() ? 0 : faceTexindices[idxF]; }
+	TexIndex GetFaceTextureIndex(FIndex idxF) const { ASSERT(faceTexindices.empty() || faceTexindices.size() == faces.size()); return faceTexindices.empty() ? 0 : faceTexindices[idxF]; }
 	void FaceTexcoordsNormalize(TexCoordArr& newFaceTexcoords, bool flipY=true) const;
 	void FaceTexcoordsUnnormalize(TexCoordArr& newFaceTexcoords, bool flipY=true) const;
 
@@ -239,6 +250,8 @@ public:
 	Mesh SubMesh(const FaceIdxArr& faces) const;
 
 	bool TransferTexture(Mesh& mesh, const FaceIdxArr& faceSubsetIndices={}, unsigned borderSize=3, unsigned textureSize=4096);
+
+	size_t GetMemorySize() const;
 
 	// file IO
 	bool Load(const String& fileName);
@@ -293,7 +306,7 @@ struct TRasterMeshBase {
 		Point3 ptc[3];
 		Point2f pti[3];
 	};
-	
+
 	const Camera& camera;
 	DepthMap& depthMap;
 

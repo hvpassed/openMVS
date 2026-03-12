@@ -60,6 +60,7 @@ class MVS_API PointCloud
 {
 public:
 	typedef IDX Index;
+	typedef SEACAVE::cList<Index,Index,0,8,Index> IndexArr;
 
 	typedef TPoint3<float> Point;
 	typedef CLISTDEF0IDX(Point,Index) PointArr;
@@ -78,6 +79,10 @@ public:
 	typedef Pixel8U Color;
 	typedef CLISTDEF0IDX(Color,Index) ColorArr;
 
+	typedef uint8_t Label;
+	typedef CLISTDEF0IDX(Label,Index) LabelArr;
+	enum : Label { LABEL_NONE = 0 };
+
 	typedef AABB3f Box;
 
 	typedef TOctree<PointArr,Point::Type,3> Octree;
@@ -90,11 +95,12 @@ public:
 
 
 public:
-	PointArr points;
+	PointArr points; // array of 3D points in world-space
 	PointViewArr pointViews; // array of views for each point (ordered increasing)
-	PointWeightArr pointWeights;
-	NormalArr normals;
-	ColorArr colors;
+	PointWeightArr pointWeights; // array of weights for each point, one per view
+	NormalArr normals; // array of normals for each point
+	ColorArr colors; // array of colors for each point
+	LabelArr labels; // array of segmentation labels for each point
 	SegmentArr segments;
 	SegProArr segmentsPro;
 public:
@@ -107,18 +113,25 @@ public:
 	inline size_t GetSize() const { ASSERT(points.size() == pointViews.size() || pointViews.empty()); return points.size(); }
 
 	void RemovePoint(IDX);
+	void RemovePoints(IndexArr&);
 	void RemovePointsOutside(const OBB3f&);
 	void RemoveMinViews(uint32_t thMinViews);
 
 	Box GetAABB() const;
-	Box GetAABB(const Box& bound) const;
+	Box GetAABB(const Box& bound, unsigned minViews=0) const;
 	Box GetAABB(unsigned minViews) const;
+	Box GetAABB(float minPercentile, float maxPercentile, unsigned minViews=0) const;
+	Box GetPercentileAABB(float minPercentile, float maxPercentile, unsigned minViews=0) const;
 	Point GetCenter() const;
 
 	Planef EstimateGroundPlane(const ImageArr& images, float planeThreshold=0, const String& fileExportPlane="") const;
 
 	bool Load(const String& fileName);
+	bool LoadPLY(const String& fileName);
+	bool LoadGLTF(const String& fileName, bool bBinary);
 	bool Save(const String& fileName, bool bViews=false, bool bLegacyTypes=false, bool bBinary=true) const;
+	bool SavePLY(const String& fileName, bool bViews=false, bool bLegacyTypes=false, bool bBinary=true) const;
+	bool SaveGLTF(const String& fileName, bool bBinary) const;
 	bool SaveNViews(const String& fileName, uint32_t minViews, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveWithScale(const String& fileName, const ImageArr& images, float scaleMult, bool bLegacyTypes=false, bool bBinary=true) const;
 	bool SaveWithSegments(const String& fileName,bool bBinary = false) const;
@@ -140,6 +153,7 @@ public:
 		ar & pointWeights;
 		ar & normals;
 		ar & colors;
+		ar & labels;
 		ar & segments;
 		ar& segmentsPro;
 	}
@@ -205,19 +219,11 @@ typedef MVS_API TImage<Depth> DepthMap;
 typedef MVS_API TImage<Normal> NormalMap;
 typedef MVS_API TImage<float> ConfidenceMap;
 typedef MVS_API SEACAVE::cList<Depth,Depth,0> DepthArr;
-typedef MVS_API SEACAVE::cList<DepthMap,const DepthMap&,2> DepthMapArr;
-typedef MVS_API SEACAVE::cList<NormalMap,const NormalMap&,2> NormalMapArr;
-typedef MVS_API SEACAVE::cList<ConfidenceMap,const ConfidenceMap&,2> ConfidenceMapArr;
+typedef MVS_API CLISTDEF2IDX(DepthMap,IIndex) DepthMapArr;
+typedef MVS_API CLISTDEF2IDX(NormalMap,IIndex) NormalMapArr;
+typedef MVS_API CLISTDEF2IDX(ConfidenceMap,IIndex) ConfidenceMapArr;
 /*----------------------------------------------------------------*/
 
 } // namespace MVS
-
-
-
-
-
-
-
-
 
 #endif // _MVS_POINTCLOUD_H_

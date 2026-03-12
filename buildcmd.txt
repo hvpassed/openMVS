@@ -35,7 +35,7 @@ packages:
       - spec: eigen@3.4.0
         prefix: /data/home/cwk/.local
       buildable: false
-      
+
     boost:
       externals:
       - spec: boost@1.90.0+python+iostreams+serialization+system+program_options
@@ -50,3 +50,10 @@ packages:
 
     hdf5:
       require: "~mpi+cxx"
+    -DOpenMVS_MAX_CUDA_COMPATIBILITY=OFF \
+    -DOpenMVS_USE_SSE=ON \
+    -DOpenMVS_USE_BREAKPAD=ON \
+    -DOpenMVS_USE_FAST_FLOAT2INT=ON \
+    -DOpenMVS_USE_FAST_CBRT=ON \
+    -DOpenMVS_USE_FAST_INVSQRT=OFF \
+    -DOpenMVS_USE_CERES=ON

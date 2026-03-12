@@ -64,6 +64,7 @@ public:
 	Camera camera; // view's pose
 	uint32_t width, height; // image size
 	Image8U3 image; // image color pixels
+	Image8U mask; // image 8-bit segmentation mask, max 256 labels
 	ViewScoreArr neighbors; // scored neighbor images (image indices ordered by score)
 	float scale; // image scale relative to the original size
 	float avgDepth; // average depth of the points seen by this camera
@@ -72,8 +73,11 @@ public:
 	inline Image() : poseID(NO_ID), width(0), height(0), avgDepth(0) {}
 
 	inline bool IsValid() const { return poseID != NO_ID; }
+	inline String GetMaskFileName() const { return maskName.empty() ? Util::getFileFullName(name)+".mask.png" : maskName; }
 	inline bool HasResolution() const { return width > 0 && height > 0; }
-	inline Image8U::Size GetSize() const { return Image8U::Size(width, height); }
+	inline cv::Size GetSize() const { return cv::Size(width, height); }
+	REAL GetSizeScale(unsigned nMaxResolution) const;
+	cv::Size GetSize(unsigned nMaxResolution) const;
 
 	// read image data from the file
 	static IMAGEPTR OpenImage(const String& fileName);
@@ -87,9 +91,9 @@ public:
 	unsigned RecomputeMaxResolution(unsigned& level, unsigned minImageSize, unsigned maxImageSize=INT_MAX) const;
 
 	Image GetImage(const PlatformArr& platforms, double scale, bool bUseImage=true) const;
-	Camera GetCamera(const PlatformArr& platforms, const Image8U::Size& resolution) const;
+	Camera GetCamera(const PlatformArr& platforms, const cv::Size& resolution, bool forceAspect=false) const;
 	void UpdateCamera(const PlatformArr& platforms);
-	REAL ComputeFOV(int dir) const;
+	REAL ComputeFOV(int dir=0) const;
 
 	static bool StereoRectifyImages(const Image& image1, const Image& image2, const Point3fArr& points1, const Point3fArr& points2, Image8U3& rectifiedImage1, Image8U3& rectifiedImage2, Image8U& mask1, Image8U& mask2, Matrix3x3& H, Matrix4x4& Q);
 	static void ScaleStereoRectification(Matrix3x3& H, Matrix4x4& Q, REAL scale);
@@ -139,6 +143,10 @@ public:
 	#endif
 };
 typedef MVS_API CLISTDEF2IDX(Image,IIndex) ImageArr;
+
+static inline IIndex ImageID2Index(const ImageArr& images, IIndex ID) {
+	return images.FindFunc([&ID](const Image& image) { return image.ID == ID; });
+}
 /*----------------------------------------------------------------*/
 
 } // namespace MVS
