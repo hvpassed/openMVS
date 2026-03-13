@@ -12,6 +12,12 @@
 
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/array.hpp>
+#include <fstream>
+#include <atomic>
+#include <cstring>
+#include <cstdint>
+
+
 #define SEG_CLASS 5	
 
 typedef Eigen::Array<float, SEG_CLASS, 1> SegProVec;
@@ -27,6 +33,32 @@ namespace boost {
 
 	} // namespace serialization
 } // namespace boost
+
+
+inline float fp16_to_fp32(uint16_t h) {
+    uint32_t sign = (h >> 15) & 1;
+    uint32_t exp = (h >> 10) & 0x1F;
+    uint32_t mant = h & 0x3FF;
+
+    uint32_t f = 0;
+    if (exp == 0) {
+        if (mant == 0) {
+            f = (sign << 31); // 零
+        } else {
+            // Subnormal (极小值)，在概率图里通常可以直接冲刷为 0
+            f = (sign << 31); 
+        }
+    } else if (exp == 0x1F) {
+        f = (sign << 31) | 0x7f800000 | (mant << 13); // Inf 或 NaN
+    } else {
+        f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13); // 正常浮点数
+    }
+
+    float res;
+    std::memcpy(&res, &f, sizeof(float));
+    return res;
+}
+
 
 class SegPro {
 
@@ -62,4 +94,5 @@ public:
 
 typedef MVS_API SEACAVE::cList< SegPro, const SegPro&, 1, 16, MVS::IIndex> SegProArr;
 SegProArr readFromHDF5(const SEACAVE::String& h5Path, const SEACAVE::String& imgRefPath = _T("imgRef.txt"));
+SegProArr readFromBINs(const SEACAVE::String& binDir, const SEACAVE::String& imgRefPath = _T("imgRef.txt"));
 #endif // __SEGPRO_H__

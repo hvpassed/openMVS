@@ -1962,7 +1962,7 @@ bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderRO
 	}
 
 
-	data.depthMaps.arrSegProData = readFromHDF5(segProH5Path,imgRefPath);
+	data.depthMaps.arrSegProData = readFromBINs(segProH5Path,imgRefPath);
 	VERBOSE("End read (segPro size: %u)", data.depthMaps.arrSegProData.GetSize());
 	switch (OPTDENSE::nFuseFilter) {
 	case OPTDENSE::FUSE_NOFILTER:
