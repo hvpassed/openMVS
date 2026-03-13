@@ -138,7 +138,7 @@ public:
 	PointCloud BuildTowerMesh(const PointCloud& origPointCloud, const Point2f& centerPoint, const float fRadius, const float fROIRadius, const float zMin, const float zMax, const float minCamZ, bool bFixRadius = false);
 	
 	// Dense reconstruction
-	bool DenseReconstruction(int nFusionMode=0, bool bCrop2ROI=true, float fBorderROI=0, float fSampleMeshNeighbors=0, bool skip=false, const String& segProH5Path=String());
+	bool DenseReconstruction(int nFusionMode=0, bool bCrop2ROI=true, float fBorderROI=0, float fSampleMeshNeighbors=0, bool skip=false, const String& segProH5Path=_T("imgRef.txt"),const String& imgRefPath = _T("dense/pro/mat.h5"));
 	bool ComputeDepthMaps(DenseDepthMapData& data);
 	void DenseReconstructionEstimate(void*);
 	void DenseReconstructionFilter(void*);

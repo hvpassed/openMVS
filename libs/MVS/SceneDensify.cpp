@@ -1630,6 +1630,7 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 	typedef CLISTDEFIDX(UseMask,IIndex) UseMaskArr;
 
 	SegProArr arrSegData = this->arrSegProData;
+	VERBOSE("SegProArr size: %u, depthMaps: %u", arrSegData.GetSize(), arrDepthData.GetSize());
 	// fuse all depth-maps, processing the best connected images first
 	const unsigned nMinViewsFuse(MINF(OPTDENSE::nMinViewsFuse, arrDepthData.size()));
 	const float normalError(COS(FD2R(OPTDENSE::fNormalDiffThreshold)));
@@ -1669,6 +1670,10 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 	const auto FusePoint = [&](IIndex ID, const ImageRef& x, unsigned fuseDepth) -> void {
 		const auto lambda = [&](IIndex ID, const ImageRef& x, unsigned fuseDepth, const auto& FusePointImpl) -> void {
 			const DepthData& depthData = arrDepthData[ID];
+			if (ID >= arrSegData.GetSize()) {
+				VERBOSE("SegPro index out of range: ID=%u, segPro size=%u", ID, arrSegData.GetSize());
+				return;
+			}
 			SegPro& segData = arrSegData[ID];
 
 			if (!Image8U::isInside(x, depthData.size))
@@ -1678,8 +1683,13 @@ void DepthMapsData::DenseFuseDepthMaps(PointCloud& pointcloud, bool bEstimateCol
 			const Depth depth = depthData.depthMap(x);
 
 			if (depth <= Depth(0))
+			{
 				return;
-			ASSERT(ISINSIDE(depth, depthData.dMin * 0.95f, depthData.dMax * 1.05f));
+			}
+			if(!ISINSIDE(depth, depthData.dMin * 0.95f, depthData.dMax * 1.05f)){
+				return;
+			}
+			// ASSERT(ISINSIDE(depth, depthData.dMin * 0.95f, depthData.dMax * 1.05f));
 			// ignore pixel if already fused
 			UseMask& useMask = arrUseMask[ID];
 			if (useMask(x))
@@ -1928,7 +1938,7 @@ void DenseDepthMapData::SignalCompleteDepthmapFilter()
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
 
-bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI, float fSampleMeshNeighbors, bool skip, const String& segProH5Path)
+bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderROI, float fSampleMeshNeighbors, bool skip, const String& segProH5Path,const String& imgRefPath)
 {
 	DenseDepthMapData data(*this, nFusionMode, fSampleMeshNeighbors);
 
@@ -1952,8 +1962,8 @@ bool Scene::DenseReconstruction(int nFusionMode, bool bCrop2ROI, float fBorderRO
 	}
 
 
-	data.depthMaps.arrSegProData = readFromHDF5(segProH5Path);
-	VERBOSE("End read");
+	data.depthMaps.arrSegProData = readFromHDF5(segProH5Path,imgRefPath);
+	VERBOSE("End read (segPro size: %u)", data.depthMaps.arrSegProData.GetSize());
 	switch (OPTDENSE::nFuseFilter) {
 	case OPTDENSE::FUSE_NOFILTER:
 		// merge depth-maps

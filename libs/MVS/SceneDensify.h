@@ -51,9 +51,6 @@ class PatchMatch;
 #endif // _USE_CUDA
 
 // structure used to compute all depth-maps
-
-typedef 
-
 class MVS_API SegProData {
 	SegProData();
 	~SegProData();

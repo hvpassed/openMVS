@@ -61,6 +61,7 @@ String strDenseConfigFileName;
 String strExportDepthMapsName;
 String strMaskPath;
 String strSegProH5Path;
+String strImageReferPath;
 float fMaxSubsceneArea;
 float fSampleMesh;
 float fSampleMeshNeighbors;
@@ -82,6 +83,7 @@ unsigned nMaxThreads;
 String strConfigFileName;
 boost::program_options::variables_map vm;
 bool bSkipImageRef;
+
 } // namespace OPT
 
 class Application {
@@ -164,6 +166,7 @@ bool Application::Initialize(size_t argc, LPCTSTR* argv)
 		("number-views-fuse", boost::program_options::value(&nMinViewsFuse)->default_value(2), "minimum number of images that agrees with an estimate during fusion in order to consider it inlier (<2 - only merge depth-maps)")
 		("ignore-mask-label", boost::program_options::value(&nIgnoreMaskLabel)->default_value(-1), "label value to ignore in the image mask, stored in the MVS scene or next to each image with '.mask.png' extension (<0 - disabled)")
 		("segpro-h5", boost::program_options::value<std::string>(&OPT::strSegProH5Path)->default_value("dense/pro/mat.h5"), "path to segmentation HDF5 file (mat.h5)")
+		("img-ref-file", boost::program_options::value<std::string>(&OPT::strImageReferPath)->default_value("imgRef.txt"), "path to the image reference text file")
 		("iters", boost::program_options::value(&nEstimationIters)->default_value(numIters), "number of patch-match iterations")
 		("geometric-iters", boost::program_options::value(&nEstimationGeometricIters)->default_value(2), "number of geometric consistent patch-match iterations (0 - disabled)")
 		("estimate-colors", boost::program_options::value(&nEstimateColors)->default_value(2), "estimate the colors for the dense point-cloud (0 - disabled, 1 - final, 2 - estimate)")
@@ -522,7 +525,7 @@ int main(int argc, LPCTSTR* argv)
 				VERBOSE("Removed all image neighbors");
 		}
 		TD_TIMER_START();
-		if (!scene.DenseReconstruction(OPT::nFusionMode, OPT::bCrop2ROI, OPT::fBorderROI, OPT::fSampleMeshNeighbors, OPT::bSkipImageRef, OPT::strSegProH5Path)) {
+		if (!scene.DenseReconstruction(OPT::nFusionMode, OPT::bCrop2ROI, OPT::fBorderROI, OPT::fSampleMeshNeighbors, OPT::bSkipImageRef, OPT::strSegProH5Path,OPT::strImageReferPath)) {
 			if (ABS(OPT::nFusionMode) != 1)
 				return EXIT_FAILURE;
 			VERBOSE("Depth-maps estimated (%s)", TD_TIMER_GET_FMT().c_str());
