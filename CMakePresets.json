@@ -54,6 +54,49 @@
         "OpenMVS_USE_HDF5":"ON",
         "OpenMVS_USE_FAISS":"ON"
       }
+    },
+    {
+      "name": "release-ninja-local",
+      "displayName": "Release Ninja Local (High Perf)",
+      "description": "Extreme optimization Release build for local execution",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_release",
+      "environment": {
+        "SPACK_VIEW": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view",
+        "CMAKE_PREFIX_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view:$env{HOME}/.local:$penv{CMAKE_PREFIX_PATH}",
+        "PKG_CONFIG_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib/pkgconfig:$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64/pkgconfig:$env{HOME}/.local/lib/pkgconfig:$env{HOME}/.local/lib64/pkgconfig:$penv{PKG_CONFIG_PATH}",
+        "LD_LIBRARY_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib:$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64:$env{HOME}/.local/lib:$env{HOME}/.local/lib64:$penv{LD_LIBRARY_PATH}",
+        "LIBRARY_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib:$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64:$env{HOME}/.local/lib:$env{HOME}/.local/lib64:$penv{LIBRARY_PATH}",
+        "CPATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/include:$env{HOME}/.local/include:$penv{CPATH}",
+        "PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/bin:$env{HOME}/.local/bin:$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -march=native -DNDEBUG",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -march=native -DNDEBUG",
+        "VCG_ROOT": "/data/home/cwk/dep/vcglib",
+        "CMAKE_PREFIX_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view;$env{HOME}/.local",
+        "CMAKE_LIBRARY_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib;$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64;$env{HOME}/.local/lib;$env{HOME}/.local/lib64",
+        "CMAKE_INCLUDE_PATH": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/include;$env{HOME}/.local/include",
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/.local",
+        "CMAKE_EXE_LINKER_FLAGS": "-L$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib -L$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64 -L$env{HOME}/.local/lib -L$env{HOME}/.local/lib64",
+        "CMAKE_SHARED_LINKER_FLAGS": "-L$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib -L$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view/lib64 -L$env{HOME}/.local/lib -L$env{HOME}/.local/lib64",
+        "BZip2_ROOT": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view",
+        "ZLIB_ROOT": "$env{HOME}/spack/var/spack/environments/openmvs_env/.spack-env/view",
+        "OpenMVS_ENABLE_IPO": "ON",
+        "OpenMVS_USE_OPENMP": "ON",
+        "BREAKPAD_ROOT": "$env{HOME}/.local",
+        "OpenMVS_USE_CUDA": "ON",
+        "OpenMVS_MAX_CUDA_COMPATIBILITY": "OFF",
+        "OpenMVS_USE_SSE": "ON",
+        "OpenMVS_USE_BREAKPAD": "ON",
+        "OpenMVS_USE_FAST_FLOAT2INT": "ON",
+        "OpenMVS_USE_FAST_CBRT": "ON",
+        "OpenMVS_USE_FAST_INVSQRT": "ON",
+        "OpenMVS_USE_CERES": "ON",
+        "OpenMVS_USE_HDF5": "ON",
+        "OpenMVS_USE_FAISS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -62,6 +105,12 @@
       "displayName": "Build Debug Ninja Local",
       "configurePreset": "debug-ninja-local",
       "jobs": 16
+    },
+    {
+      "name": "build-release-ninja-local",
+      "displayName": "Build Release Ninja Local",
+      "configurePreset": "release-ninja-local",
+      "jobs": 32
     }
   ]
 }

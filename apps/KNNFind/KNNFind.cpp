@@ -1,4 +1,4 @@
-#define APPNAME _T("TestPointCloud")
+#define APPNAME _T("KNNFind")
 #include "../../libs/MVS.h"
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <boost/iostreams/stream.hpp>
@@ -11,17 +11,17 @@
 #include<faiss/gpu/GpuIndexFlat.h>
 #include<faiss/gpu/StandardGpuResources.h>
 
-//²éÕÒ×î½ü10¸öÁÚ¾Ó
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½10ï¿½ï¿½ï¿½Ú¾ï¿½
 int main() {
     auto t1 = std::chrono::high_resolution_clock::now();
 	std::cout << "Loading point cloud..." << std::endl;
-    // 1. ÄÚ´æÓ³Éä£¨ÎÞ¿½±´£©
+    // 1. ï¿½Ú´ï¿½Ó³ï¿½ä£¨ï¿½Þ¿ï¿½ï¿½ï¿½ï¿½ï¿½
     boost::iostreams::mapped_file_source mmap("pointcloud_dense.bin");
     boost::iostreams::stream<boost::iostreams::array_source>
         stream(mmap.data(), mmap.size());
 
 	std::cout << "unserializing ..." << std::endl;
-    // 2. ¿ìËÙ·´ÐòÁÐ»¯
+    // 2. ï¿½ï¿½ï¿½Ù·ï¿½ï¿½ï¿½ï¿½Ð»ï¿½
     MVS::PointCloud pointcloud;
     {
         boost::archive::binary_iarchive ia(stream);
@@ -40,7 +40,7 @@ int main() {
 
     auto t3 = std::chrono::high_resolution_clock::now();
     
-    const int k = 10; // ²éÕÒÃ¿¸öµãµÄ10¸ö×î½üÁÚ
+    const int k = 10; // ï¿½ï¿½ï¿½ï¿½Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½10ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     const size_t compute_num = num_points;
     faiss::gpu::StandardGpuResources gpu_resources;
 
@@ -59,9 +59,21 @@ int main() {
 
 
     auto t4 = std::chrono::high_resolution_clock::now();
-    std::cout << "searching ..." << std::endl;
-    index.search(compute_num, point_data, k, distances, indices);
+    const size_t batch_size = 500000; 
 
+    for (size_t i = 0; i < compute_num; i += batch_size) {
+        // è®¡ç®—å½“å‰æ‰¹æ¬¡è¦å¤„ç†çš„çœŸå®žç‚¹æ•°ï¼ˆé˜²æ­¢æœ€åŽä¸€æ¬¡è¶Šç•Œï¼‰
+        size_t current_batch = std::min(batch_size, compute_num - i);
+        
+        // åˆ†æ‰¹é€å…¥ GPUï¼Œåˆ©ç”¨æŒ‡é’ˆåç§»é‡å†™å…¥å¯¹åº”çš„å†…å­˜ä½ç½®
+        index.search(
+            current_batch,                  // å½“å‰æ‰¹æ¬¡æŸ¥è¯¢æ•°é‡
+            point_data + i * dimension,     // å½“å‰æ‰¹æ¬¡æŸ¥è¯¢ç‚¹çš„å†…å­˜èµ·å§‹åœ°å€
+            k, 
+            distances + i * k,              // å½“å‰æ‰¹æ¬¡è·ç¦»ç»“æžœçš„å†™å…¥åœ°å€
+            indices + i * k                 // å½“å‰æ‰¹æ¬¡ç´¢å¼•ç»“æžœçš„å†™å…¥åœ°å€
+        );
+    }
     auto t5 = std::chrono::high_resolution_clock::now();
     std::cout << "First point's " << k << " nearest neighbors:" << std::endl;
     for (int i = 0; i < k; ++i) {
@@ -76,11 +88,11 @@ int main() {
         return -1;
     }
 
-    // Ð´ÈëµãµÄÊýÁ¿¡¢k Öµ
+    // Ð´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½k Öµ
     outFile.write(reinterpret_cast<const char*>(&compute_num), sizeof(size_t));
     outFile.write(reinterpret_cast<const char*>(&k), sizeof(int));
 
-    // Ð´Èë indices ºÍ distances
+    // Ð´ï¿½ï¿½ indices ï¿½ï¿½ distances
     outFile.write(reinterpret_cast<const char*>(indices), sizeof(faiss::idx_t) * compute_num * k);
     outFile.write(reinterpret_cast<const char*>(distances), sizeof(float) * num_points * k);
 
@@ -88,7 +100,7 @@ int main() {
     std::cout << "KNN results saved to knn_results.bin" << std::endl;
 
 
-    // Êä³ö¼ÆÊ±½á¹û
+    // ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½
     auto load_time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
     auto convert_time = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
     auto knn_time = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();

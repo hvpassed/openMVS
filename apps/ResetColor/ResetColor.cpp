@@ -1,4 +1,4 @@
-#define APPNAME _T("TestView")
+#define APPNAME _T("ResetColor")
 #include "../../libs/MVS.h"
 #include<iostream>
 #include<unordered_map>
@@ -11,7 +11,7 @@ bool AdjustColor(MVS::PointCloud & pointCloud,const std::unordered_map<MVS::Poin
 	return true;
 
 }
-//µ÷ÕûµãÔÆÑÕÉ«
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É«
 //"backgound", "building", "woodland", "water", "road"
 int main(void) {
 	MVS::PointCloud pointcloud;
