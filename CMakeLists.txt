@@ -116,6 +116,73 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build/Modules)
 # Note: With modern CMake and target-based propagation, we only collect libraries in OpenMVS_EXTRA_LIBS
 # Include directories are now handled via target_include_directories in the Common library
 SET(OpenMVS_EXTRA_LIBS "")
+message(STATUS "Injecting static target spoofs for OpenCV/OpenMVS...")
+
+if(NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(ZLIB::ZLIB PROPERTIES IMPORTED_LOCATION "/usr/local/lib/libz.a")
+endif()
+
+if(NOT TARGET LERC::LERC)
+    add_library(LERC::LERC UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(LERC::LERC PROPERTIES IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libLerc.a")
+endif()
+
+if(NOT TARGET glog::glog)
+    add_library(glog::glog INTERFACE IMPORTED GLOBAL)
+endif()
+
+if(NOT TARGET Iconv::Iconv)
+    add_library(Iconv::Iconv INTERFACE IMPORTED GLOBAL)
+endif()
+
+if(NOT TARGET JPEG::JPEG AND EXISTS "$ENV{HOME}/.local/lib/libjpeg.a")
+    add_library(JPEG::JPEG UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(JPEG::JPEG PROPERTIES IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libjpeg.a")
+endif()
+
+
+if(NOT TARGET liblzma::liblzma)
+    add_library(liblzma::liblzma INTERFACE IMPORTED GLOBAL)
+    set_target_properties(liblzma::liblzma PROPERTIES INTERFACE_LINK_LIBRARIES "-llzma")
+endif()
+
+if(NOT TARGET ZSTD::ZSTD AND EXISTS "$ENV{HOME}/.local/lib/libzstd.a")
+  add_library(ZSTD::ZSTD UNKNOWN IMPORTED GLOBAL)
+  set_target_properties(ZSTD::ZSTD PROPERTIES
+    IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libzstd.a"
+    INTERFACE_INCLUDE_DIRECTORIES "$ENV{HOME}/.local/include"
+  )
+endif()
+
+if(NOT TARGET WebP::webp AND EXISTS "$ENV{HOME}/.local/lib/libwebp.a")
+  add_library(WebP::webp UNKNOWN IMPORTED GLOBAL)
+  set_target_properties(WebP::webp PROPERTIES
+    IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libwebp.a"
+    INTERFACE_INCLUDE_DIRECTORIES "$ENV{HOME}/.local/include"
+  )
+endif()
+
+if(NOT TARGET WebP::webpmux AND EXISTS "$ENV{HOME}/.local/lib/libwebpmux.a")
+  add_library(WebP::webpmux UNKNOWN IMPORTED GLOBAL)
+  set_target_properties(WebP::webpmux PROPERTIES
+    IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libwebpmux.a"
+    INTERFACE_INCLUDE_DIRECTORIES "$ENV{HOME}/.local/include"
+  )
+endif()
+
+if(NOT TARGET WebP::webpdemux AND EXISTS "$ENV{HOME}/.local/lib/libwebpdemux.a")
+  add_library(WebP::webpdemux UNKNOWN IMPORTED GLOBAL)
+  set_target_properties(WebP::webpdemux PROPERTIES
+    IMPORTED_LOCATION "$ENV{HOME}/.local/lib/libwebpdemux.a"
+    INTERFACE_INCLUDE_DIRECTORIES "$ENV{HOME}/.local/include"
+  )
+endif()
+
+if(NOT TARGET CMath::CMath)
+  add_library(CMath::CMath INTERFACE IMPORTED GLOBAL)
+  set_property(TARGET CMath::CMath PROPERTY INTERFACE_LINK_LIBRARIES m)
+endif()
 
 if(OpenMVS_ENABLE_IPO)
 	INCLUDE(CheckIPOSupported)
@@ -266,7 +333,7 @@ if(Eigen3_FOUND)
 	SET(_USE_EIGEN TRUE)
 	MESSAGE(STATUS "Eigen ${Eigen3_VERSION} found")
 endif()
-
+FIND_PACKAGE(Ceres CONFIG REQUIRED)
 FIND_PACKAGE(OpenCV REQUIRED)
 if(OpenCV_FOUND)
 	ADD_DEFINITIONS(${OpenCV_DEFINITIONS})
@@ -284,33 +351,16 @@ set(MKL_COMPONENTS
 )
 SET(FAISS_EXTRA_LIBS "")
 set(MKL_INTERFACE_FULL "intel_lp64")
-find_package(MKL REQUIRED COMPONENTS ${MKL_COMPONENTS})
-if(MKL_FOUND)
-	message(STATUS "Using Intel MKL for BLAS/LAPACK")
-	MESSAGE(STATUS "Intel MKL ${MKL_VERSION} found (libs: ${MKL_LIBRARIES})")
-	if(NOT MKL_LIBRARIES)
-		if(MSVC)
-			set(MKL_LIBRARIES
-				"${MKL_ROOT}/lib/mkl_intel_lp64_dll.lib"
-                "${MKL_ROOT}/lib/mkl_sequential_dll.lib"
-                "${MKL_ROOT}/lib/mkl_core_dll.lib"
-			)
-			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
-		else()
-			set(MKL_LIBRARIES
-				"${MKL_ROOT}/lib/libmkl_intel_lp64.so"
-                "${MKL_ROOT}/lib/libmkl_sequential.so"
-                "${MKL_ROOT}/lib/libmkl_core.so"
-			)
-			message(STATUS "Manually set MKL libraries: ${MKL_LIBRARIES}")
-		endif()
-    endif()
-	list(APPEND OpenMVS_EXTRA_LIBS ${MKL_LIBRARIES})
-	list(APPEND FAISS_EXTRA_LIBS ${MKL_LIBRARIES})
-else()
-	MESSAGE(STATUS "-- Can't find MKL. Please specify MKL directory using MKL_DIR variable")
-endif()
+message(STATUS "INITIATING HARDCORE STATIC MKL OVERRIDE")
+set(MKL_LIBRARIES
+    "/opt/intel/oneapi/mkl/latest/lib/libmkl_intel_lp64.a"
+    "/opt/intel/oneapi/mkl/latest/lib/libmkl_sequential.a"
+    "/opt/intel/oneapi/mkl/latest/lib/libmkl_core.a"
+)
+message(STATUS "Forced MKL Static Libraries: ${MKL_LIBRARIES}")
 
+list(APPEND OpenMVS_EXTRA_LIBS ${MKL_LIBRARIES})
+list(APPEND FAISS_EXTRA_LIBS ${MKL_LIBRARIES})
 find_package(FAISS REQUIRED)
 
 if(TARGET faiss)
